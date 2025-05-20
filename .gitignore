@@ -1,0 +1,8 @@
+# node
+node_modules/
+# server
+server/node_modules/
+# ui
+ui/node_modules/
+# среда
+.env
