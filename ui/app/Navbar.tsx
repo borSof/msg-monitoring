@@ -21,7 +21,18 @@ export function Navbar() {
           <Link as={NextLink} href="/rules" color={color} fontWeight="medium" _hover={{ textDecoration: "underline", color: "blue.500" }}>
             Rules
           </Link>
-        </Flex>
+<Link as={NextLink} href="/maybe" color={color} fontWeight="medium" _hover={{ textDecoration: "underline", color: "orange.400" }}>
+  Maybe
+</Link>
+
+<Link as={NextLink} href="/fields" color={color} fontWeight="medium" _hover={{ textDecoration: "underline", color: "teal.400" }}>
+  Fields
+</Link>
+
+<Link as={NextLink} href="/status" color={color} fontWeight="medium" _hover={{ textDecoration: "underline", color: "teal.400" }}>
+  Status
+</Link>  
+      </Flex>
       </Flex>
     </Box>
   )

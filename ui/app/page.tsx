@@ -1,6 +1,10 @@
 'use client'
 
-import { Box, Heading, List, ListItem, Flex, Text, Icon, Spinner, useColorModeValue, useColorMode, IconButton } from "@chakra-ui/react"
+import { useState } from "react"
+import {
+  Box, Heading, List, ListItem, Flex, Text, Icon, Spinner, useColorModeValue, useColorMode, IconButton,
+  useDisclosure, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Code
+} from "@chakra-ui/react"
 import { FaCheckCircle, FaExclamationTriangle, FaTimesCircle, FaMoon, FaSun } from "react-icons/fa"
 import { useQuery } from "@tanstack/react-query"
 import axios from "axios"
@@ -25,7 +29,7 @@ function ColorModeSwitcher() {
 
 interface Message {
   _id: string
-  parsed: { message: { text: string } }
+  parsed: any // Показваме всички полета!
   status: string
 }
 
@@ -40,6 +44,11 @@ function getStatusProps(status: string) {
   }
 }
 
+// helper за достъп до вложени полета като "message.text"
+function getField(obj: any, path: string) {
+  return path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj)
+}
+
 export default function MessagesPage() {
   const { data, isLoading, error } = useQuery<Message[]>({
     queryKey: ['messages'],
@@ -47,17 +56,26 @@ export default function MessagesPage() {
     staleTime: 30_000
   })
 
+  // Взимаме видимите полета от бекенда
+  const { data: visibleFields, isLoading: loadingFields } = useQuery<string[]>({
+    queryKey: ['visibleFields'],
+    queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
+  })
+
+  const [selected, setSelected] = useState<Message | null>(null)
+  const { isOpen, onOpen, onClose } = useDisclosure()
+
   const boxBg = useColorModeValue("white", "gray.800")
   const headingColor = useColorModeValue("gray.800", "gray.100")
 
-  if (isLoading) return (
+  if (isLoading || loadingFields) return (
     <Flex justify="center" align="center" minH="50vh">
       <Spinner size="xl" color="blue.500" />
     </Flex>
   )
 
   if (error) return <Text p={6} color="red.500">Error loading messages</Text>
-return (
+  return (
     <Box
       bg={boxBg}
       maxW={{ base: "95vw", md: "2xl" }}
@@ -70,7 +88,7 @@ return (
       w="full"
       minH="60vh"
     >
-      <ColorModeSwitcher />
+ <ColorModeSwitcher />
       <Heading size="lg" mb={6} color={headingColor}>Messages</Heading>
       <List spacing={5}>
         {data!.map((m, i) => {
@@ -82,11 +100,25 @@ return (
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: i * 0.06 }}
             >
-              <ListItem>
+              <ListItem
+                _hover={{ bg: useColorModeValue("gray.100", "gray.700"), cursor: "pointer" }}
+                borderRadius="md"
+                px={2}
+                onClick={() => { setSelected(m); onOpen(); }}
+              >
                 <Flex align="center" justify="space-between" flexWrap="wrap">
-                  <Text fontSize="lg" color={headingColor} maxW="65vw" isTruncated>
-                    {m.parsed.message.text}
-                  </Text>
+                  <Flex direction="column" gap={1} maxW="65vw">
+                    {visibleFields?.length
+                      ? visibleFields.map(field => (
+                          <Text fontSize="md" key={field} isTruncated>
+                            <b>{field}:</b> {String(getField(m.parsed, field) ?? '—')}
+                          </Text>
+                        ))
+                      : <Text fontSize="md" isTruncated>
+                          {m.parsed?.message?.text || JSON.stringify(m.parsed)}
+                        </Text>
+                    }
+                  </Flex>
                   <Flex align="center" minW="120px" justify="end">
                     <Icon as={icon} color={color} boxSize={5} mr={2} />
                     <Text fontWeight="bold" color={color} fontSize="lg">
@@ -99,6 +131,22 @@ return (
           )
         })}
       </List>
+
+      {/* Детайли за съобщението */}
+      <Modal isOpen={isOpen} onClose={onClose} size="lg">
+        <ModalOverlay />
+        <ModalContent>
+          <ModalHeader>Message Details</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            {selected && (
+              <Code width="100%" whiteSpace="pre" fontSize="md" borderRadius="md" p={2}>
+                {JSON.stringify(selected.parsed, null, 2)}
+              </Code>
+            )}
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </Box>
   )
 }

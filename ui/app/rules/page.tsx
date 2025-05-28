@@ -20,7 +20,7 @@ interface Rule {
 }
 
 const OPERATORS = ['contains', 'equals', 'regex', 'gt', 'lt']
-const ACTIONS = ['Allowed', 'Forbidden', 'Tag']
+const ACTIONS = ['Allowed', 'Forbidden', 'Tag', 'Maybe'];
 
 export default function RulesPage() {
   const queryClient = useQueryClient()

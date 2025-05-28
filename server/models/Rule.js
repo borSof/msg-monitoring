@@ -20,7 +20,7 @@ const RuleSchema = new mongoose.Schema({
   },
   action: {
     type: String,
-    enum: ['Allowed','Forbidden','Tag'],
+  enum: ['Allowed', 'Forbidden', 'Tag', 'Maybe'],
     required: true
   },
   tag: String,
