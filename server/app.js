@@ -12,6 +12,14 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const FieldMetadata = require('./models/FieldMetadata');
 
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const User = require('./models/User');
+const JWT_SECRET = process.env.JWT_SECRET || 'topsecret'; // Използвай ENV на продукция!
+const Role = require('./models/Role');
+const Channel = require('./models/Channel');
+const axios = require('axios');
+
 // CORS and body parsing middleware
 app.use(cors({ origin: ['http://localhost:3001', 'http://192.168.199.129:3001'] }));
 app.use(express.json());
@@ -44,6 +52,142 @@ const Message = require('./models/Message');
 const Rule = require('./models/Rule');
 const SystemConfig = require('./models/SystemConfig');
 
+// LOGIN
+app.post('/api/login', async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password)
+    return res.status(400).json({ error: "Username and password required" });
+
+  const user = await User.findOne({ username });
+  if (!user || !user.active)
+    return res.status(401).json({ error: "Invalid credentials" });
+
+  const ok = await bcrypt.compare(password, user.passwordHash);
+  if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+  // ВЗИМАМЕ ПРАВАТА ДИНАМИЧНО
+  const roleDoc = await Role.findOne({ name: user.role });
+  const permissions = roleDoc ? roleDoc.permissions : [];
+
+  const token = jwt.sign(
+    { username: user.username, role: user.role, id: user._id },
+    JWT_SECRET,
+    { expiresIn: "8h" }
+  );
+
+  res.json({
+    token,
+    username: user.username,
+    role: user.role,
+    permissions
+  });
+
+  auditLog("LOGIN", user.username, { time: new Date().toISOString() });
+});
+
+//+++++Callback
+// --- CHANNEL (webhook) MANAGEMENT API ---
+// GET: всички канали
+app.get('/api/channels', async (req, res) => {
+  const channels = await Channel.find();
+  res.json(channels);
+});
+
+// POST: създай нов канал
+app.post('/api/channels', async (req, res) => {
+  const { name, callbackUrl, format, active, triggerOn } = req.body;
+  if (!name || !callbackUrl) return res.status(400).json({ error: "Missing required fields" });
+  const exists = await Channel.findOne({ name });
+  if (exists) return res.status(409).json({ error: "Channel already exists" });
+  const channel = new Channel({ name, callbackUrl, format, active, triggerOn });
+  await channel.save();
+  res.status(201).json(channel);
+});
+
+// PUT: редактирай канал
+app.put('/api/channels/:id', async (req, res) => {
+  const { name, callbackUrl, format, active, triggerOn } = req.body;
+  const channel = await Channel.findByIdAndUpdate(
+    req.params.id,
+    { name, callbackUrl, format, active, triggerOn },
+    { new: true }
+  );
+  res.json(channel);
+});
+
+// DELETE: триене на канал
+app.delete('/api/channels/:id', async (req, res) => {
+  await Channel.findByIdAndDelete(req.params.id);
+  res.json({ message: "Channel deleted" });
+});
+// === USER MANAGEMENT API (CRUD) ===
+
+// GET: всички потребители (production: сложи проверка за роля!)
+app.get('/api/users', async (req, res) => {
+  const users = await User.find({}, { passwordHash: 0 });
+  res.json(users);
+});
+
+// POST: създай потребител
+app.post('/api/users', async (req, res) => {
+  const { username, password, role, active } = req.body;
+  if (!username || !password) return res.status(400).json({ error: "Missing fields" });
+  const exists = await User.findOne({ username });
+  if (exists) return res.status(409).json({ error: "Username exists" });
+  const passwordHash = await bcrypt.hash(password, 10);
+  const user = new User({ username, passwordHash, role, active });
+  await user.save();
+  auditLog("CREATE_USER", req.user?.username || "system", { username, role, active });
+  res.status(201).json({ message: "User created" });
+});
+
+// PUT: редактирай потребител
+app.put('/api/users/:id', async (req, res) => {
+  const { password, role, active } = req.body;
+  const update = { role, active };
+  if (password) update.passwordHash = await bcrypt.hash(password, 10);
+  await User.findByIdAndUpdate(req.params.id, update);
+  auditLog("UPDATE_USER", req.user?.username || "system", { id: req.params.id, ...update });
+  res.json({ message: "User updated" });
+});
+
+// DELETE: триене на потребител
+app.delete('/api/users/:id', async (req, res) => {
+  await User.findByIdAndDelete(req.params.id);
+  auditLog("DELETE_USER", req.user?.username || "system", { id: req.params.id });
+  res.json({ message: "User deleted" });
+});
+
+//Roles
+// Get all roles
+app.get('/api/roles', async (req, res) => {
+  const roles = await Role.find();
+  res.json(roles);
+});
+
+// Create role
+app.post('/api/roles', async (req, res) => {
+  const { name, permissions } = req.body;
+  if (!name) return res.status(400).json({ error: "Missing role name" });
+  const exists = await Role.findOne({ name });
+  if (exists) return res.status(409).json({ error: "Role exists" });
+  const role = new Role({ name, permissions });
+  await role.save();
+  res.status(201).json(role);
+});
+
+// Update role
+app.put('/api/roles/:id', async (req, res) => {
+  const { permissions } = req.body;
+  const updated = await Role.findByIdAndUpdate(req.params.id, { permissions }, { new: true });
+  res.json(updated);
+});
+
+// Delete role
+app.delete('/api/roles/:id', async (req, res) => {
+  await Role.findByIdAndDelete(req.params.id);
+  res.json({ message: "Role deleted" });
+});
 // ---------------------------Health-check endpoint
 app.get('/', (req, res) => res.send('Server is running'));
 
@@ -150,6 +294,25 @@ app.post('/api/messages', async (req, res) => {
 
     const msg = new Message({ rawXml: raw, parsed, status, tags, matchedRule: matchedRuleName });
     await msg.save();
+ // --- WEBHOOK LOGIC ---
+    const triggerStatus = status; // Allowed, Forbidden, Maybe
+    const channels = await Channel.find({ active: true, triggerOn: triggerStatus });
+    for (const ch of channels) {
+      try {
+        await axios.post(ch.callbackUrl, {
+          status,
+          id: msg._id,
+          tags,
+          matchedRule: matchedRuleName,
+          parsed: msg.parsed,
+          rawXml: msg.rawXml,
+          receivedAt: msg.receivedAt
+        });
+        systemLog("WEBHOOK_SENT", `Sent to ${ch.callbackUrl} status=${status}`);
+      } catch (e) {
+        errorLog(e, `Webhook send failed: ${ch.callbackUrl}`);
+      }
+    }
     systemLog("NEW_MESSAGE", `Message ${msg._id} status: ${status}`);
     res.json({ status, id: msg._id, tags, matchedRule: matchedRuleName });
   } catch (e) {
@@ -167,6 +330,40 @@ app.get('/api/messages', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+app.patch('/api/messages/:id/status', async (req, res) => {
+  const { status } = req.body
+  if (!status || !["Allowed", "Forbidden", "Maybe"].includes(status))
+    return res.status(400).json({ error: "Invalid status" })
+
+  const updated = await Message.findByIdAndUpdate(
+    req.params.id,
+    { status: status },
+    { new: true }
+  )
+
+  if (!updated) return res.status(404).json({ error: "Message not found" })
+  // може да логнеш тук ако искаш auditLog(...)
+ // --- WEBHOOK LOGIC ---
+  const channels = await Channel.find({ active: true, triggerOn: status });
+  for (const ch of channels) {
+    try {
+      await axios.post(ch.callbackUrl, {
+        status,
+        id: updated._id,
+        tags: updated.tags,
+        matchedRule: updated.matchedRule,
+        parsed: updated.parsed,
+        rawXml: updated.rawXml,
+        receivedAt: updated.receivedAt
+      });
+      systemLog("WEBHOOK_SENT", `Sent to ${ch.callbackUrl} status=${status}`);
+    } catch (e) {
+      errorLog(e, `Webhook send failed: ${ch.callbackUrl}`);
+    }
+  }
+  res.json({ message: "Status updated", id: req.params.id, status })
+})
 
 // GET maybe-only messages
 app.get('/api/messages/maybe', async (req, res) => {

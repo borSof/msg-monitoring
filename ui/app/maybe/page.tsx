@@ -1,9 +1,12 @@
 'use client'
 
+import { useAuth } from "../providers/AuthProvider"
 import { Box, Heading, List, ListItem, Flex, Text, Icon, Button, Spinner, useColorModeValue } from "@chakra-ui/react"
 import { FaExclamationTriangle, FaCheckCircle, FaTimesCircle } from "react-icons/fa"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
+import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
 
 interface Message {
   _id: string
@@ -12,11 +15,28 @@ interface Message {
 }
 
 export default function MaybePage() {
+  const { token, permissions } = useAuth() as any
+  const router = useRouter()
+  const [checked, setChecked] = useState(false)
+
+  // Guard logic – ПЪРВО!
+  useEffect(() => {
+    if (!token) {
+      router.replace("/login")
+    } else if (!permissions?.includes("review_maybe")) {
+      router.replace("/no-access")
+    } else {
+      setChecked(true)
+    }
+  }, [token, permissions, router])
+
+  // ВСИЧКИ HOOKS ТУК, но useQuery с enabled: checked!
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery<Message[]>({
     queryKey: ['maybe'],
     queryFn: () => axios.get('/api/messages/maybe').then(r => r.data),
-    staleTime: 30_000
+    staleTime: 30_000,
+    enabled: checked, // !!! Не се стартира докато не е минал guard-а
   })
 
   const mutation = useMutation({
@@ -30,6 +50,13 @@ export default function MaybePage() {
 
   const boxBg = useColorModeValue("white", "gray.800")
   const headingColor = useColorModeValue("gray.800", "gray.100")
+
+  // Guard spinner – трябва да е СЛЕД всички hooks, да има само един return!
+  if (!checked) return (
+    <Flex justify="center" align="center" minH="50vh">
+      <Spinner size="xl" color="yellow.500" />
+    </Flex>
+  )
 
   if (isLoading) return (
     <Flex justify="center" align="center" minH="50vh">

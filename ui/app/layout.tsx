@@ -1,6 +1,7 @@
 import './globals.css'
 import { Providers } from './providers'
 import { Navbar } from './Navbar'
+import { AuthProvider } from './providers/AuthProvider'
 
 export const metadata = {
   title: 'Message Monitoring',

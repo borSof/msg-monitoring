@@ -1,21 +1,41 @@
 'use client'
 
+import { useAuth } from "../providers/AuthProvider"
 import React, { useState, useEffect } from "react"
 import { Box, Heading, Input, Button, Flex, Text, useToast, Spinner } from "@chakra-ui/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
+import { useRouter } from "next/navigation"
 
 export default function FieldsPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
+  const router = useRouter()
+  const { token, permissions } = useAuth() as any
+
+  // Guard: чак когато потребителят има права, page се рендира
+  const [checked, setChecked] = useState(false)
+  useEffect(() => {
+    if (!token) {
+      router.replace("/login")
+    } else if (!permissions?.includes("manage_fields")) {
+      router.replace("/no-access")
+    } else {
+      setChecked(true)
+    }
+  }, [token, permissions, router])
+
+  // Винаги декларирай всички hooks!
   const { data: visibleFields, isLoading } = useQuery<string[]>({
     queryKey: ['visibleFields'],
     queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
+    enabled: checked, // само ако е минал guard-а
   })
 
   const { data: allFields, isLoading: isLoadingAllFields } = useQuery<string[]>({
     queryKey: ['allMessageFields'],
     queryFn: () => axios.get('/api/messages/fields').then(r => r.data),
+    enabled: checked,
   })
 
   const [input, setInput] = useState("")
@@ -35,6 +55,11 @@ export default function FieldsPage() {
       toast({ title: "Fields updated!", status: "success" })
     }
   })
+
+  // Guard spinner
+  if (!checked) return <Box p={8}><Spinner size="xl" /></Box>
+
+  // Истинското съдържание:
   return (
     <Box maxW="2xl" mx="auto" p={8}>
       <Heading size="md" mb={4}>Visible Fields (Custom Fields)</Heading>
@@ -72,7 +97,7 @@ export default function FieldsPage() {
         )}
       </Box>
 
-    {/* Save button */}
+      {/* Save button */}
       <Button colorScheme="blue" onClick={() => mutation.mutate(fields)} isLoading={mutation.isPending} mb={8}>
         Save
       </Button>

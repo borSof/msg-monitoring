@@ -1,12 +1,14 @@
 'use client'
 
+import { useAuth } from "../providers/AuthProvider"
 import {
   Box, Heading, Table, Thead, Tbody, Tr, Th, Td,
   Button, FormControl, FormLabel, Input, Select, Flex, Spinner, useToast
 } from '@chakra-ui/react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { useRouter } from "next/navigation"
 
 interface Rule {
   _id: string
@@ -23,13 +25,28 @@ const OPERATORS = ['contains', 'equals', 'regex', 'gt', 'lt']
 const ACTIONS = ['Allowed', 'Forbidden', 'Tag', 'Maybe'];
 
 export default function RulesPage() {
+  const { token, permissions } = useAuth() as any
+  const router = useRouter()
   const queryClient = useQueryClient()
   const toast = useToast()
 
-  // Fetch all rules
+  // ---- GUARD ----
+  const [checked, setChecked] = useState(false)
+  useEffect(() => {
+    if (!token) {
+      router.replace("/login")
+    } else if (!permissions?.includes("edit_rules")) {
+      router.replace("/no-access")
+    } else {
+      setChecked(true)
+    }
+  }, [token, permissions, router])
+
+  // Всички hooks трябва да са винаги на едно и също място!
   const { data: rules, isLoading } = useQuery<Rule[]>({
     queryKey: ['rules'],
     queryFn: () => axios.get('/api/rules').then(res => res.data),
+    enabled: checked // само ако има право!
   })
 
   // State for new rule form
@@ -57,6 +74,11 @@ export default function RulesPage() {
     }
   })
 
+  // Показвай spinner докато guard не е минат
+  if (!checked) {
+    return <Flex justify="center" p={10}><Spinner size="xl" /></Flex>
+  }
+
   return (
     <Box maxW="4xl" mx="auto" p={8}>
       <Heading size="lg" mb={6}>Rules</Heading>
@@ -72,7 +94,7 @@ export default function RulesPage() {
           createMutation.mutate(form)
         }}
       >
- <Flex gap={4} flexWrap="wrap">
+        <Flex gap={4} flexWrap="wrap">
           <FormControl isRequired>
             <FormLabel>Name</FormLabel>
             <Input value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -103,7 +125,7 @@ export default function RulesPage() {
               <Input value={form.tag || ''} onChange={e => setForm(f => ({ ...f, tag: e.target.value }))} />
             </FormControl>
           )}
-          <FormControl isRequired>
+        <FormControl isRequired>
             <FormLabel>Priority</FormLabel>
             <Input type="number" min={1} value={form.priority || 1} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
           </FormControl>
@@ -111,7 +133,7 @@ export default function RulesPage() {
         </Flex>
       </Box>
 
- {/* Rules table */}
+      {/* Rules table */}
       {isLoading ? (
         <Flex justify="center" p={10}><Spinner /></Flex>
       ) : (

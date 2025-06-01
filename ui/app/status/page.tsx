@@ -1,21 +1,46 @@
 'use client'
 
+import { useAuth } from "../providers/AuthProvider"
 import { Box, Heading, Flex, Text, Badge, SimpleGrid, Spinner, Code } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
 import axios from "axios"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 
 export default function StatusPage() {
+  const { token, permissions } = useAuth() as any
+  const router = useRouter()
+
+  // Guard logic
+  const [checked, setChecked] = useState(false)
+  useEffect(() => {
+    if (!token) {
+      router.replace("/login")
+    } else if (!permissions?.includes("view_status")) {
+      router.replace("/no-access")
+    } else {
+      setChecked(true)
+    }
+  }, [token, permissions, router])
+
+  // Винаги извикай useQuery — използвай enabled: checked
   const { data, isLoading, error } = useQuery({
     queryKey: ['status'],
     queryFn: () => axios.get('/api/status').then(r => r.data),
-    refetchInterval: 10_000
+    refetchInterval: 10_000,
+    enabled: checked // ТУК Е КЛЮЧА! useQuery не стреля докато няма достъп
   })
+
+  if (!checked) return (
+    <Flex justify="center" align="center" minH="40vh"><Spinner size="lg" /></Flex>
+  )
 
   if (isLoading) return (
     <Flex justify="center" align="center" minH="40vh"><Spinner size="lg" /></Flex>
   )
 
   if (error) return <Text color="red.500">Error loading status</Text>
+  if (!data) return null // Ако няма данни
 
   return (
     <Box maxW="2xl" mx="auto" p={8}>
@@ -54,7 +79,7 @@ export default function StatusPage() {
       <Box mb={6}>
         <Heading size="sm">Main Endpoints</Heading>
         <SimpleGrid columns={{ base: 1, md: 2 }} spacing={2}>
-          {data.endpoints.map(ep => (
+          {data.endpoints.map((ep: string) => (
             <Code key={ep}>{ep}</Code>
           ))}
         </SimpleGrid>
