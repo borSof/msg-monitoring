@@ -1,7 +1,9 @@
 'use client'
 
 import { useAuth } from "../providers/AuthProvider"
-import { Box, Heading, List, ListItem, Flex, Text, Icon, Button, Spinner, useColorModeValue } from "@chakra-ui/react"
+import {
+  Box, Heading, List, ListItem, Flex, Text, Icon, Button, Spinner, useColorModeValue
+} from "@chakra-ui/react"
 import { FaExclamationTriangle, FaCheckCircle, FaTimesCircle } from "react-icons/fa"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
@@ -10,8 +12,25 @@ import { useEffect, useState } from "react"
 
 interface Message {
   _id: string
-  parsed: { message: { text: string } }
+  parsed: any
   status: string
+}
+
+const renderParsed = (obj: any, prefix = ''): JSX.Element[] => {
+  const out: JSX.Element[] = []
+  for (const k in obj) {
+    const path = prefix ? `${prefix}.${k}` : k
+    if (typeof obj[k] === 'object' && obj[k] !== null) {
+      out.push(...renderParsed(obj[k], path))
+    } else {
+      out.push(
+        <Text key={path} fontFamily="mono" fontSize="sm" whiteSpace="pre-wrap" color="gray.700">
+          {path} = <b>{String(obj[k])}</b>
+        </Text>
+      )
+    }
+  }
+  return out
 }
 
 export default function MaybePage() {
@@ -19,7 +38,6 @@ export default function MaybePage() {
   const router = useRouter()
   const [checked, setChecked] = useState(false)
 
-  // Guard logic – ПЪРВО!
   useEffect(() => {
     if (!token) {
       router.replace("/login")
@@ -30,13 +48,12 @@ export default function MaybePage() {
     }
   }, [token, permissions, router])
 
-  // ВСИЧКИ HOOKS ТУК, но useQuery с enabled: checked!
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery<Message[]>({
     queryKey: ['maybe'],
     queryFn: () => axios.get('/api/messages/maybe').then(r => r.data),
     staleTime: 30_000,
-    enabled: checked, // !!! Не се стартира докато не е минал guard-а
+    enabled: checked,
   })
 
   const mutation = useMutation({
@@ -51,7 +68,6 @@ export default function MaybePage() {
   const boxBg = useColorModeValue("white", "gray.800")
   const headingColor = useColorModeValue("gray.800", "gray.100")
 
-  // Guard spinner – трябва да е СЛЕД всички hooks, да има само един return!
   if (!checked) return (
     <Flex justify="center" align="center" minH="50vh">
       <Spinner size="xl" color="yellow.500" />
@@ -83,28 +99,30 @@ export default function MaybePage() {
       <List spacing={5}>
         {data.map((m) => (
           <ListItem key={m._id}>
-            <Flex align="center" justify="space-between" gap={2} wrap="wrap">
-              <Text fontSize="md" color={headingColor} maxW="55vw" isTruncated>
-                <Icon as={FaExclamationTriangle} color="yellow.500" boxSize={4} mr={2} />
-                {m.parsed.message.text}
-              </Text>
-              <Flex gap={2}>
-                <Button
-                  size="sm"
-                  colorScheme="green"
-                  leftIcon={<FaCheckCircle />}
-                  onClick={() => mutation.mutate({ id: m._id, status: "Allowed" })}
-                  isLoading={mutation.isPending}
-                >Allow</Button>
-                <Button
-                  size="sm"
-                  colorScheme="red"
-                  leftIcon={<FaTimesCircle />}
-                  onClick={() => mutation.mutate({ id: m._id, status: "Forbidden" })}
-                  isLoading={mutation.isPending}
-                >Forbid</Button>
+            <Box bg="gray.50" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+              <Flex align="center" justify="space-between" gap={4} wrap="wrap">
+                <Box>
+                  <Icon as={FaExclamationTriangle} color="yellow.500" boxSize={4} mr={2} />
+                  {renderParsed(m.parsed)}
+                </Box>
+                <Flex gap={2}>
+                  <Button
+                    size="sm"
+                    colorScheme="green"
+                    leftIcon={<FaCheckCircle />}
+                    onClick={() => mutation.mutate({ id: m._id, status: "Allowed" })}
+                    isLoading={mutation.isPending}
+                  >Allow</Button>
+                  <Button
+                    size="sm"
+                    colorScheme="red"
+                    leftIcon={<FaTimesCircle />}
+                    onClick={() => mutation.mutate({ id: m._id, status: "Forbidden" })}
+                    isLoading={mutation.isPending}
+                  >Forbid</Button>
+                </Flex>
               </Flex>
-            </Flex>
+            </Box>
           </ListItem>
         ))}
       </List>

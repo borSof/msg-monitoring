@@ -251,56 +251,75 @@ app.get('/ping', (req, res) => res.send('pong'));
 // POST /api/messages with Rule Engine
 app.post('/api/messages', async (req, res) => {
   try {
-    const parsed = req.body;
+    let parsed = req.body;
     const raw = JSON.stringify(parsed);
+
+    // Unwrap root if needed
+    if (Object.keys(parsed).length === 1 && typeof parsed[Object.keys(parsed)[0]] === 'object') {
+      parsed = parsed[Object.keys(parsed)[0]];
+      systemLog("UNWRAP", `Unwrapped root key to ${JSON.stringify(parsed).substring(0, 200)}`);
+    }
+
     const rules = await Rule.find().sort({ priority: 1, createdAt: 1 });
-    let status = 'Maybe';
     const tags = [];
     let matchedRuleName = null;
+    let finalAction = 'Maybe';
 
     const getField = (obj, path) =>
       path.split('.').reduce((o, p) => (o && o[p] != null ? o[p] : null), obj);
 
-    for (const r of rules) {
-      const fieldValue = getField(parsed, r.field);
-      if (fieldValue == null) continue;
-      const str = String(fieldValue);
-      let match = false;
-      switch (r.operator) {
-        case 'contains': match = str.includes(r.value); break;
-        case 'equals':   match = str === r.value; break;
-        case 'regex':    match = new RegExp(r.value).test(str); break;
-        case 'gt':       match = Number(str) > Number(r.value); break;
-        case 'lt':       match = Number(str) < Number(r.value); break;
+    function checkCondition(obj, cond) {
+      const val = getField(obj, cond.field);
+      if (val == null) return false;
+      const str = String(val);
+      switch (cond.operator) {
+        case 'contains': return str.includes(cond.value);
+        case 'not contains': return !str.includes(cond.value);
+        case 'equals': return str === cond.value;
+        case 'regex': return new RegExp(cond.value).test(str);
+        case 'gt': return Number(str) > Number(cond.value);
+        case 'lt': return Number(str) < Number(cond.value);
+        default: return false;
       }
-     if (!match) continue;
-      if (r.action === 'Tag') {
-        tags.push(r.tag);
-        continue;
-      }
-      status = r.action;
-      matchedRuleName = r.name;
-      break;
     }
 
-    if (status === 'Maybe' && !matchedRuleName) {
+for (const r of rules) {
+  const result = (r.logic === "AND")
+    ? r.conditions.every(cond => checkCondition(parsed, cond))
+    : r.conditions.some(cond => checkCondition(parsed, cond));
+  if (!result) continue;
+
+  if (r.action === 'Tag') {
+    if (r.tag) tags.push(r.tag);
+    continue;
+  }
+
+  // само тук попълваме matchedRule и финалното действие
+  if (!matchedRuleName || r.priority < 9999) {
+    matchedRuleName = r.name;
+    finalAction = r.action === 'Forbidden' ? 'Forbidden'
+      : r.action === 'Maybe' && finalAction !== 'Forbidden' ? 'Maybe'
+      : r.action === 'Allowed' && finalAction === 'Maybe' ? 'Maybe'
+      : r.action;
+  }
+}
+
+    // fallback
+    if (!matchedRuleName) {
       const low = raw.toLowerCase();
-      if (low.includes('ban')) {
-        status = 'Forbidden';
-      } else if (low.includes('allow') || low.includes('ok')) {
-        status = 'Allowed';
-      }
+      if (low.includes('ban')) finalAction = 'Forbidden';
+      else if (low.includes('allow') || low.includes('ok')) finalAction = 'Allowed';
     }
 
-    const msg = new Message({ rawXml: raw, parsed, status, tags, matchedRule: matchedRuleName });
+    const msg = new Message({ rawXml: raw, parsed, status: finalAction, tags, matchedRule: matchedRuleName });
     await msg.save();
- // --- WEBHOOK LOGIC ---
-    const triggerStatus = status; // Allowed, Forbidden, Maybe
+
+    const triggerStatus = finalAction;
     const channels = await Channel.find({ active: true, triggerOn: triggerStatus });
     for (const ch of channels) {
       try {
         await axios.post(ch.callbackUrl, {
-          status,
+          status: finalAction,
           id: msg._id,
           tags,
           matchedRule: matchedRuleName,
@@ -308,18 +327,20 @@ app.post('/api/messages', async (req, res) => {
           rawXml: msg.rawXml,
           receivedAt: msg.receivedAt
         });
-        systemLog("WEBHOOK_SENT", `Sent to ${ch.callbackUrl} status=${status}`);
+        systemLog("WEBHOOK_SENT", `Sent to ${ch.callbackUrl} status=${finalAction}`);
       } catch (e) {
         errorLog(e, `Webhook send failed: ${ch.callbackUrl}`);
       }
     }
-    systemLog("NEW_MESSAGE", `Message ${msg._id} status: ${status}`);
-    res.json({ status, id: msg._id, tags, matchedRule: matchedRuleName });
+
+    systemLog("NEW_MESSAGE", `Message ${msg._id} status: ${finalAction}`);
+    res.json({ status: finalAction, id: msg._id, tags, matchedRule: matchedRuleName });
   } catch (e) {
     errorLog(e, "Error saving message");
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 // GET all messages
 app.get('/api/messages', async (req, res) => {
   try {
@@ -332,19 +353,19 @@ app.get('/api/messages', async (req, res) => {
 });
 
 app.patch('/api/messages/:id/status', async (req, res) => {
-  const { status } = req.body
+  const { status } = req.body;
   if (!status || !["Allowed", "Forbidden", "Maybe"].includes(status))
-    return res.status(400).json({ error: "Invalid status" })
+    return res.status(400).json({ error: "Invalid status" });
 
   const updated = await Message.findByIdAndUpdate(
     req.params.id,
     { status: status },
     { new: true }
-  )
+  );
 
-  if (!updated) return res.status(404).json({ error: "Message not found" })
-  // може да логнеш тук ако искаш auditLog(...)
- // --- WEBHOOK LOGIC ---
+  if (!updated) return res.status(404).json({ error: "Message not found" });
+
+  // --- WEBHOOK LOGIC ---
   const channels = await Channel.find({ active: true, triggerOn: status });
   for (const ch of channels) {
     try {
@@ -362,8 +383,9 @@ app.patch('/api/messages/:id/status', async (req, res) => {
       errorLog(e, `Webhook send failed: ${ch.callbackUrl}`);
     }
   }
-  res.json({ message: "Status updated", id: req.params.id, status })
-})
+
+  res.json({ message: "Status updated", id: req.params.id, status });
+});
 
 // GET maybe-only messages
 app.get('/api/messages/maybe', async (req, res) => {
@@ -385,11 +407,13 @@ app.get('/api/rules', async (req, res) => {
 app.post('/api/rules',
   [
     body('name').isString().notEmpty(),
-    body('field').isString().notEmpty(),
-    body('operator').isIn(['contains','equals','regex','gt','lt']),
-    body('value').isString().notEmpty(),
+    body('logic').isIn(['AND', 'OR']),
     body('action').isIn(['Allowed','Forbidden','Tag','Maybe']),
-    body('priority').isInt({ min: 1 })
+    body('priority').isInt({ min: 1 }),
+    body('conditions').isArray({ min: 1 }),
+    body('conditions.*.field').isString().notEmpty(),
+    body('conditions.*.operator').isIn(['contains', 'not contains', 'equals','regex','gt','lt']),
+    body('conditions.*.value').isString().notEmpty()
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -400,6 +424,7 @@ app.post('/api/rules',
     res.status(201).json(rule);
   }
 );
+
 
 app.put('/api/rules/:id', async (req, res) => {
   const updated = await Rule.findByIdAndUpdate(req.params.id, req.body, { new: true });
