@@ -1,0 +1,25 @@
+const cron = require('node-cron');
+const Message = require('../models/Message');
+
+const timeoutLimit = 5 * 60 * 1000;  // 5 минути в милисекунди
+
+const messageTimeoutTask = () => {
+  cron.schedule('* * * * *', async () => {
+    const currentTime = new Date().getTime();
+
+    // Търсим съобщения със статус "Maybe" и проверяваме дали времето на получаване е минало
+    const maybeMessages = await Message.find({
+      status: 'Maybe',
+      receivedAt: { $lt: new Date(currentTime - timeoutLimit) }
+    });
+
+    // Ако има съобщения, които трябва да се маркират като "Forbidden"
+    maybeMessages.forEach(async (message) => {
+      message.status = 'Forbidden';  // Променяме статус на "Forbidden"
+      message.tags.push('timeout');  // Добавяме таг за тайм-аут
+      await message.save();  // Записваме промените в базата
+    });
+  });
+};
+
+module.exports = messageTimeoutTask;

@@ -1,8 +1,22 @@
-# node
+# Node.js и Next.js стандарт
 node_modules/
-# server
-server/node_modules/
-# ui
-ui/node_modules/
-# среда
 .env
+logs/
+*.log
+*.save
+*.save.*
+.DS_Store
+
+# Server logs
+server/logs/
+
+# Next.js build output
+.next/
+out/
+dist/
+
+# VS Code
+.vscode/
+
+# Локални временни файлове
+*.local

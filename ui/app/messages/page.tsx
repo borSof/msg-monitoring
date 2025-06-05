@@ -1,178 +1,185 @@
-'use client'
+'use client';
 
-import { useAuth } from "../providers/AuthProvider"
-import { useState, useEffect } from "react"
 import {
-  Box, Heading, List, ListItem, Flex, Text, Icon, Spinner, useColorModeValue, useColorMode, IconButton,
-  useDisclosure, Modal, ModalOverlay, ModalContent, ModalHeader, ModalCloseButton, ModalBody, Code
-} from "@chakra-ui/react"
-import { FaCheckCircle, FaExclamationTriangle, FaTimesCircle, FaMoon, FaSun } from "react-icons/fa"
-import { useQuery } from "@tanstack/react-query"
-import axios from "axios"
-import { motion } from "framer-motion"
-import { useRouter } from "next/navigation"
+  Box, Heading, Table, Thead, Tbody, Tr, Th, Td,
+  Flex, Spinner, Badge, Code, Text
+} from '@chakra-ui/react';
+import { useAuth } from '../providers/AuthProvider';
+import { useRouter } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
+import axios from 'axios';
+import { useEffect, useMemo } from 'react';
 
-function ColorModeSwitcher() {
-  const { colorMode, toggleColorMode } = useColorMode()
-  return (
-    <IconButton
-      aria-label="Toggle dark mode"
-      icon={colorMode === "light" ? <FaMoon /> : <FaSun />}
-      onClick={toggleColorMode}
-      position="absolute"
-      top={4}
-      right={4}
-      size="md"
-      variant="ghost"
-      zIndex={1}
-    />
-  )
-}
+function renderParsed(parsed: any) {
+  if (!parsed) return <Text>-</Text>;
 
-interface Message {
-  _id: string
-  parsed: any
-  status: string
-}
-
-function getStatusProps(status: string) {
-  switch (status) {
-    case "Forbidden":
-      return { color: "red.500", icon: FaTimesCircle }
-    case "Maybe":
-      return { color: "yellow.500", icon: FaExclamationTriangle }
-    default:
-      return { color: "green.600", icon: FaCheckCircle }
+  if (typeof parsed === 'string') {
+    try { parsed = JSON.parse(parsed); } catch {
+      return <Code colorScheme="red">{parsed}</Code>;
+    }
   }
+
+  if (
+    typeof parsed === 'object' &&
+    parsed !== null &&
+    Object.keys(parsed).length === 1 &&
+    (parsed as any).message
+  ) {
+    parsed = (parsed as any).message;
+  }
+
+  const rows: JSX.Element[] = [];
+  const walk = (obj: any, path = '') => {
+    for (const [k, v] of Object.entries(obj)) {
+      const p = path ? `${path}.${k}` : k;
+      if (typeof v === 'object' && v !== null) walk(v, p);
+      else
+        rows.push(
+          <Box key={p} px={2} py={1} fontSize="sm">
+            <Code>{p} = {String(v)}</Code>
+          </Box>
+        );
+    }
+  };
+  walk(parsed);
+  return (
+    <Box p={2} bg="gray.50" borderRadius="md" maxH="200px" overflow="auto">
+      {rows}
+    </Box>
+  );
 }
 
-// helper за достъп до вложени полета като "message.text"
-function getField(obj: any, path: string) {
-  return path.split('.').reduce((o, p) => (o ? o[p] : undefined), obj)
-}
+// *** Новата AI Result колона като отделна функция ***
+function renderAiResult(aiResult: any) {
+  if (!aiResult || !aiResult.label) return <Text>-</Text>;
+  const color = aiResult.label === 'Allowed' ? 'green'
+    : aiResult.label === 'Forbidden' ? 'red'
+    : aiResult.label === 'Maybe' ? 'yellow'
+    : 'gray';
 
+  // Взимаме всички, но пропускаме главния label
+  const { raw } = aiResult;
+  let otherLabels: { lbl: string; score: number }[] = [];
+  if (raw?.labels?.length > 1 && raw?.scores?.length === raw.labels.length) {
+    otherLabels = raw.labels
+      .map((lbl: string, idx: number) => ({ lbl, score: raw.scores[idx] }))
+      .filter(obj => obj.lbl !== aiResult.label); // махаме главния
+  }
+
+  return (
+    <Box>
+      <Badge
+        colorScheme={color}
+        px={2}
+        py={1}
+        fontSize="xs"
+        fontWeight="bold"
+        variant="solid"
+        mr={1}
+      >
+        {aiResult.label.toUpperCase()} {typeof aiResult.score === 'number' ? `(${(aiResult.score * 100).toFixed(0)}%)` : ''}
+      </Badge>
+      {otherLabels.length > 0 &&
+        <Box mt={1} fontSize="0.75em" display="flex" gap={1} flexWrap="wrap">
+          {otherLabels.map(({ lbl, score }) => (
+            <Badge
+              key={lbl}
+              colorScheme={
+                lbl === 'Allowed' ? 'green'
+                  : lbl === 'Forbidden' ? 'red'
+                  : lbl === 'Maybe' ? 'yellow'
+                  : 'gray'
+              }
+              variant="subtle"
+              px={1.5}
+              py={0.5}
+              fontSize="1em"
+              fontWeight="semibold"
+            >
+              {lbl.toUpperCase()} {score !== undefined ? `(${(score * 100).toFixed(0)}%)` : ''}
+            </Badge>
+          ))}
+        </Box>
+      }
+    </Box>
+  );
+}
 export default function MessagesPage() {
-  const { token, permissions } = useAuth() as any
-  const router = useRouter()
-  const [checked, setChecked] = useState(false)
+  const { token, permissions } = useAuth() as any;
+  const router = useRouter();
 
-  // Guard logic
+  const canView = useMemo(
+    () => !!token && permissions?.includes('view_messages'),
+    [token, permissions]
+  );
+
   useEffect(() => {
     if (!token) {
-      router.replace("/login")
-    } else if (!permissions?.includes("view_messages")) {
-      router.replace("/no-access")
-    } else {
-      setChecked(true)
+      router.replace('/login');
+    } else if (!canView) {
+      router.replace('/no-access');
     }
-  }, [token, permissions, router])
+  }, [token, canView, router]);
 
-  // --- HOOKS винаги остават в началото ---
-  const { data, isLoading, error } = useQuery<Message[]>({
+  if (!canView) {
+    return (
+      <Flex justify="center" mt={24}>
+        <Spinner size="xl" />
+      </Flex>
+    );
+  }
+
+  const { data: messages, isLoading, error } = useQuery({
     queryKey: ['messages'],
-    queryFn: () => axios.get('/api/messages').then(r => r.data),
-    staleTime: 30_000,
-    enabled: checked // <-- само ако е минал guard-а!
-  })
+    queryFn : () => axios.get('/api/messages').then(r => r.data),
+    staleTime: 30_000
+  });
 
-  const { data: visibleFields, isLoading: loadingFields } = useQuery<string[]>({
-    queryKey: ['visibleFields'],
-    queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
-    enabled: checked
-  })
+  if (error) {
+    return (
+      <Flex justify="center" mt={24}>
+        <Text color="red.500">Грешка при зареждане на съобщенията</Text>
+      </Flex>
+    );
+  }
 
-  const [selected, setSelected] = useState<Message | null>(null)
-  const { isOpen, onOpen, onClose } = useDisclosure()
-
-  const boxBg = useColorModeValue("white", "gray.800")
-  const headingColor = useColorModeValue("gray.800", "gray.100")
-
-  // Guard spinner (докато не е проверено)
-  if (!checked) return (
-    <Flex justify="center" align="center" minH="50vh">
-      <Spinner size="xl" color="blue.500" />
-    </Flex>
-  )
-
-  if (isLoading || loadingFields) return (
-    <Flex justify="center" align="center" minH="50vh">
-      <Spinner size="xl" color="blue.500" />
-    </Flex>
-  )
-
-  if (error) return <Text p={6} color="red.500">Error loading messages</Text>
   return (
-    <Box
-      bg={boxBg}
-      maxW={{ base: "95vw", md: "2xl" }}
-      mx="auto"
-      mt={{ base: 4, md: 12 }}
-      p={{ base: 2, md: 8 }}
-      borderRadius="2xl"
-      boxShadow="lg"
-      position="relative"
-      w="full"
-      minH="60vh"
-    >
-   <ColorModeSwitcher />
-      <Heading size="lg" mb={6} color={headingColor}>Messages</Heading>
-      <List spacing={5}>
-        {data!.map((m, i) => {
-          const { color, icon } = getStatusProps(m.status)
-          return (
-            <motion.div
-              key={m._id}
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: i * 0.06 }}
-            >
-              <ListItem
-                _hover={{ bg: useColorModeValue("gray.100", "gray.700"), cursor: "pointer" }}
-                borderRadius="md"
-                px={2}
-                onClick={() => { setSelected(m); onOpen(); }}
-              >
-                <Flex align="center" justify="space-between" flexWrap="wrap">
-                  <Flex direction="column" gap={1} maxW="65vw">
-                    {visibleFields?.length
-                      ? visibleFields.map(field => (
-                          <Text fontSize="md" key={field} isTruncated>
-                            <b>{field}:</b> {String(getField(m.parsed, field) ?? '—')}
-                          </Text>
-                        ))
-                      : <Text fontSize="md" isTruncated>
-                          {m.parsed?.message?.text || JSON.stringify(m.parsed)}
-                        </Text>
-                    }
-                  </Flex>
-                  <Flex align="center" minW="120px" justify="end">
-                    <Icon as={icon} color={color} boxSize={5} mr={2} />
-                    <Text fontWeight="bold" color={color} fontSize="lg">
-                      {m.status}
-                    </Text>
-                  </Flex>
-                </Flex>
-              </ListItem>
-            </motion.div>
-          )
-        })}
-      </List>
+    <Box maxW="6xl" mx="auto" p={8}>
+      <Heading size="lg" mb={6}>Messages</Heading>
 
-      {/* Детайли за съобщението */}
-      <Modal isOpen={isOpen} onClose={onClose} size="lg">
-        <ModalOverlay />
-        <ModalContent>
-          <ModalHeader>Message Details</ModalHeader>
-          <ModalCloseButton />
-          <ModalBody>
-            {selected && (
-              <Code width="100%" whiteSpace="pre" fontSize="md" borderRadius="md" p={2}>
-                {JSON.stringify(selected.parsed, null, 2)}
-              </Code>
-            )}
-          </ModalBody>
-        </ModalContent>
-      </Modal>
+      {isLoading ? (
+        <Flex justify="center" py={10}><Spinner /></Flex>
+      ) : (
+        <Table size="sm" bg="white" borderRadius="lg" boxShadow="md">
+          <Thead bg="gray.200">
+            <Tr>
+              <Th w="40%">Parsed</Th>
+              <Th>Status</Th>
+              <Th>Matched Rule</Th>
+              <Th>Tags</Th>
+              <Th>AI Result</Th>
+              <Th>Received</Th>
+            </Tr>
+          </Thead>
+          <Tbody>
+            {messages?.map((m: any) => (
+              <Tr key={m._id} _hover={{ bg: 'gray.50' }}>
+                <Td>{renderParsed(m.parsed)}</Td>
+                <Td>
+                  {m.status === 'Allowed'   && <Badge colorScheme="green">✅ Allowed</Badge>}
+                  {m.status === 'Forbidden' && <Badge colorScheme="red">❌ Forbidden</Badge>}
+                  {m.status === 'Maybe'     && <Badge colorScheme="yellow">⚠️ Maybe</Badge>}
+                  {m.status === 'Tag'       && <Badge colorScheme="blue">🏷️ Tag</Badge>}
+                </Td>
+                <Td>{m.matchedRule || '-'}</Td>
+                <Td>{m.tags?.join(', ') || '-'}</Td>
+                <Td>{renderAiResult(m.aiResult)}</Td>
+                <Td>{new Date(m.receivedAt).toLocaleString()}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      )}
     </Box>
-  )
+  );
 }

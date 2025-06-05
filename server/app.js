@@ -20,6 +20,11 @@ const Role = require('./models/Role');
 const Channel = require('./models/Channel');
 const axios = require('axios');
 
+const { aiClassifyMessage } = require('./ai');
+
+require('dotenv').config();
+
+
 // CORS and body parsing middleware
 app.use(cors({ origin: ['http://localhost:3001', 'http://192.168.199.129:3001'] }));
 app.use(express.json());
@@ -58,10 +63,12 @@ app.post('/api/login', async (req, res) => {
   if (!username || !password)
     return res.status(400).json({ error: "Username and password required" });
 
+  // Търсим потребителя в базата данни
   const user = await User.findOne({ username });
   if (!user || !user.active)
     return res.status(401).json({ error: "Invalid credentials" });
 
+  // Сравняваме паролата
   const ok = await bcrypt.compare(password, user.passwordHash);
   if (!ok) return res.status(401).json({ error: "Invalid credentials" });
 
@@ -69,12 +76,16 @@ app.post('/api/login', async (req, res) => {
   const roleDoc = await Role.findOne({ name: user.role });
   const permissions = roleDoc ? roleDoc.permissions : [];
 
+  // Генерираме токен с ID-то на потребителя
   const token = jwt.sign(
     { username: user.username, role: user.role, id: user._id },
     JWT_SECRET,
     { expiresIn: "8h" }
   );
 
+  console.log('Generated Token:', token); // Логваме токена за проверка
+
+  // Изпращаме токена в отговора и записваме в `localStorage` на клиента
   res.json({
     token,
     username: user.username,
@@ -82,6 +93,7 @@ app.post('/api/login', async (req, res) => {
     permissions
   });
 
+  // Логваме успешния вход
   auditLog("LOGIN", user.username, { time: new Date().toISOString() });
 });
 
@@ -249,6 +261,7 @@ app.get('/api/status', async (req, res) => {
 app.get('/ping', (req, res) => res.send('pong'));
 
 // POST /api/messages with Rule Engine
+// POST /api/messages with Rule Engine + AI classification
 app.post('/api/messages', async (req, res) => {
   try {
     let parsed = req.body;
@@ -265,6 +278,7 @@ app.post('/api/messages', async (req, res) => {
     let matchedRuleName = null;
     let finalAction = 'Maybe';
 
+    // ----- Rule Engine -----
     const getField = (obj, path) =>
       path.split('.').reduce((o, p) => (o && o[p] != null ? o[p] : null), obj);
 
@@ -283,26 +297,26 @@ app.post('/api/messages', async (req, res) => {
       }
     }
 
-for (const r of rules) {
-  const result = (r.logic === "AND")
-    ? r.conditions.every(cond => checkCondition(parsed, cond))
-    : r.conditions.some(cond => checkCondition(parsed, cond));
-  if (!result) continue;
+    for (const r of rules) {
+      const result = (r.logic === "AND")
+        ? r.conditions.every(cond => checkCondition(parsed, cond))
+        : r.conditions.some(cond => checkCondition(parsed, cond));
+      if (!result) continue;
 
-  if (r.action === 'Tag') {
-    if (r.tag) tags.push(r.tag);
-    continue;
-  }
+      if (r.action === 'Tag') {
+        if (r.tag) tags.push(r.tag);
+        continue;
+      }
 
-  // само тук попълваме matchedRule и финалното действие
-  if (!matchedRuleName || r.priority < 9999) {
-    matchedRuleName = r.name;
-    finalAction = r.action === 'Forbidden' ? 'Forbidden'
-      : r.action === 'Maybe' && finalAction !== 'Forbidden' ? 'Maybe'
-      : r.action === 'Allowed' && finalAction === 'Maybe' ? 'Maybe'
-      : r.action;
-  }
-}
+      // само тук попълваме matchedRule и финалното действие
+      if (!matchedRuleName || r.priority < 9999) {
+        matchedRuleName = r.name;
+        finalAction = r.action === 'Forbidden' ? 'Forbidden'
+          : r.action === 'Maybe' && finalAction !== 'Forbidden' ? 'Maybe'
+          : r.action === 'Allowed' && finalAction === 'Maybe' ? 'Maybe'
+          : r.action;
+      }
+    }
 
     // fallback
     if (!matchedRuleName) {
@@ -311,9 +325,32 @@ for (const r of rules) {
       else if (low.includes('allow') || low.includes('ok')) finalAction = 'Allowed';
     }
 
-    const msg = new Message({ rawXml: raw, parsed, status: finalAction, tags, matchedRule: matchedRuleName });
+    // ----- AI Classification -----
+    let aiResult = null;
+    try {
+      aiResult = await aiClassifyMessage(raw); // (async function, връща примерно { label: 'forbidden', score: 0.98 })
+      if (aiResult?.label) {
+        tags.push('AI:' + aiResult.label); // можеш да смениш/оцветиш тага във фронта
+        // Ако искаш AI-то да override-ва status:
+        // if (aiResult.label === 'forbidden') finalAction = 'Forbidden';
+        // else if (aiResult.label === 'maybe' && finalAction === 'Allowed') finalAction = 'Maybe';
+      }
+    } catch (err) {
+      errorLog(err, "AI classification error");
+    }
+
+    // ----- Save message -----
+    const msg = new Message({
+      rawXml: raw,
+      parsed,
+      status: finalAction,
+      tags,
+      matchedRule: matchedRuleName,
+      aiResult // пази пълния AI резултат
+    });
     await msg.save();
 
+    // --- Trigger webhooks if any ---
     const triggerStatus = finalAction;
     const channels = await Channel.find({ active: true, triggerOn: triggerStatus });
     for (const ch of channels) {
@@ -334,7 +371,7 @@ for (const r of rules) {
     }
 
     systemLog("NEW_MESSAGE", `Message ${msg._id} status: ${finalAction}`);
-    res.json({ status: finalAction, id: msg._id, tags, matchedRule: matchedRuleName });
+    res.json({ status: finalAction, id: msg._id, tags, matchedRule: matchedRuleName, aiResult });
   } catch (e) {
     errorLog(e, "Error saving message");
     res.status(500).json({ error: 'Internal server error' });
@@ -547,12 +584,38 @@ app.get('/api/messages/fields', async (req, res) => {
 });
 
 // ---------------------------------
+// PUT /api/users/change-password
+app.put('/api/users/self/change-password', async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+  const token = req.headers.authorization?.split(' ')[1];
 
+  if (!token) return res.status(401).json({ error: 'Няма токен' });
+  if (!oldPassword || !newPassword)
+    return res.status(400).json({ error: 'Липсва стара/нова парола' });
+
+  try {
+    const { id } = jwt.verify(token, JWT_SECRET);
+    const user   = await User.findById(id);
+    if (!user)   return res.status(404).json({ error: 'Не е намерен' });
+
+    if (!await bcrypt.compare(oldPassword, user.passwordHash))
+      return res.status(400).json({ error: 'Невалидна стара парола' });
+
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    await user.save();
+
+    auditLog('CHANGE_PASSWORD', user.username);
+    res.json({ message: 'Паролата е променена успешно' });
+  } catch (err) {
+    errorLog(err, 'change-password');
+    res.status(500).json({ error: 'Грешка при смяна на паролата' });
+  }
+});
 // Start server
-mongoose.connect('mongodb://localhost:27017/msg-monitoring', {
-  user: 'admin',
-  pass: '1234',
-  authSource: 'admin'
+mongoose.connect(process.env.MONGO_URL, {
+  user: process.env.MONGO_USER,
+  pass: process.env.MONGO_PASS,
+  authSource: process.env.MONGO_AUTH_SOURCE
 })
   .then(() => {
     systemLog("SERVER_START", "MongoDB connected and server started");
@@ -563,3 +626,5 @@ mongoose.connect('mongodb://localhost:27017/msg-monitoring', {
     console.error('MongoDB error:', err);
   });
 
+const messageTimeoutTask = require('./cronTasks/messageTimeout');  // Път към cron задача
+messageTimeoutTask();  // Стартиране на cron задачата

@@ -9,10 +9,15 @@ const MessageSchema = new mongoose.Schema({
     default: 'Maybe'
   },
   matchedRule: String, // ✅ добавено
-  tags: [String],       // ако използваш тагове
+  tags: [String],      // ако използваш тагове
   receivedAt: {
     type: Date,
     default: Date.now
+  },
+  aiResult: {
+    label: String,
+    score: Number,
+ raw: mongoose.Schema.Types.Mixed
   }
 });
 

@@ -1,55 +1,94 @@
 'use client'
-import { createContext, useContext, useState, useEffect } from "react"
 
-function decodeJwt(token: string): any {
+import React, {
+  createContext, useContext,
+  useState, useEffect
+} from 'react'
+
+/* ───────── константи ───────── */
+const LS_TOKEN = 'authToken'
+const LS_ROLE  = 'role'
+const LS_USER  = 'username'
+const LS_PERM  = 'permissions'
+
+/* ───────── helpers ─────────── */
+function decodeJwt (token: string) {
   try {
-    const base64Url = token.split('.')[1]
-    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/')
-    const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-      return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2)
-    }).join(''))
-    return JSON.parse(jsonPayload)
-  } catch {
-    return null
-  }
+    const [, base64Url] = token.split('.')
+    const json = atob(base64Url.replace(/-/g, '+').replace(/_/g, '/'))
+    return JSON.parse(json)
+  } catch { return null }
 }
 
-const AuthContext = createContext<any>(null)
+/* ───────── контекст ────────── */
+interface AuthCtx {
+  token: string | null
+  role:  string | null
+  username: string | null
+  permissions: string[]
+  setToken:       (t: string|null) => void
+  setRole:        (r: string|null) => void
+  setUsername:    (u: string|null) => void
+  setPermissions: (p: string[])    => void
+}
+const AuthContext = createContext<AuthCtx>(null!)
 
-export function AuthProvider({ children }: any) {
-  const [token, setToken] = useState<string | null>(null)
-  const [role, setRole] = useState<string | null>(null)
-  const [username, setUsername] = useState<string | null>(null)
+export const useAuth = () => useContext(AuthContext)
+
+/* ───────── provider ────────── */
+export function AuthProvider ({ children }:{children:React.ReactNode}) {
+  const [token, setToken]             = useState<string|null>(null)
+  const [role, setRole]               = useState<string|null>(null)
+  const [username, setUsername]       = useState<string|null>(null)
   const [permissions, setPermissions] = useState<string[]>([])
 
-  // На стартиране: зареждай локалните auth данни
+  /* ---------- 1. четем localStorage само веднъж ---------- */
   useEffect(() => {
-    const tok = localStorage.getItem("token")
-    const role = localStorage.getItem("role")
-    const username = localStorage.getItem("username")
-    const perms = localStorage.getItem("permissions")
-    setToken(tok)
-    setRole(role)
-    setUsername(username)
-    setPermissions(perms ? JSON.parse(perms) : [])
+    if (typeof window === 'undefined') return        // SSR guard
+    setToken(       localStorage.getItem(LS_TOKEN))
+    setRole(        localStorage.getItem(LS_ROLE))
+    setUsername(    localStorage.getItem(LS_USER))
+    setPermissions(JSON.parse(localStorage.getItem(LS_PERM) || '[]'))
   }, [])
 
-  // Проверявай валидността на токена при всяка промяна!
+  /* ---------- 2. пазим state-а обратно в localStorage ---------- */
   useEffect(() => {
-    if (token) {
-      const decoded = decodeJwt(token)
-      if (!decoded || !decoded.exp || Date.now() >= decoded.exp * 1000) {
-        // Token is invalid or expired
-        setToken(null)
-        setRole(null)
-        setUsername(null)
-        setPermissions([])
-        localStorage.clear()
-        // Може да използваш router, но за да е универсално:
-        window.location.href = "/login"
-      }
-    }
+    token ? localStorage.setItem(LS_TOKEN, token)
+          : localStorage.removeItem(LS_TOKEN)
   }, [token])
+
+  useEffect(() => {
+    role  ? localStorage.setItem(LS_ROLE, role)
+          : localStorage.removeItem(LS_ROLE)
+  }, [role])
+
+  useEffect(() => {
+    username ? localStorage.setItem(LS_USER, username)
+             : localStorage.removeItem(LS_USER)
+  }, [username])
+
+  useEffect(() => {
+    localStorage.setItem(LS_PERM, JSON.stringify(permissions))
+  }, [permissions])
+
+  /* ---------- 3. auto-logout при изтекъл токен ---------- */
+  useEffect(() => {
+    if (!token) return
+    const dec = decodeJwt(token)
+    if (!dec?.exp) return
+    const msLeft = dec.exp * 1000 - Date.now()
+    if (msLeft <= 0) return logout()
+
+    const t = setTimeout(logout, msLeft)
+    return () => clearTimeout(t)
+  }, [token])
+
+  /* ---------- helpers ---------- */
+  function logout () {
+    setToken(null); setRole(null); setUsername(null); setPermissions([])
+    localStorage.clear()
+    if (typeof window !== 'undefined') window.location.href = '/login'
+  }
 
   return (
     <AuthContext.Provider value={{
@@ -61,8 +100,4 @@ export function AuthProvider({ children }: any) {
       {children}
     </AuthContext.Provider>
   )
-}
-
-export function useAuth() {
-  return useContext(AuthContext)
 }
