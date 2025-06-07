@@ -18,6 +18,7 @@ const PAGES = [
   { href: '/status',   label: 'Status',   permission: 'view_status'   },
   { href: '/users',    label: 'Users',    permission: 'manage_users'  },
   { href: '/roles',    label: 'Roles',    permission: 'manage_roles'  },
+  { href: "/channels", label: "Channels", permission: "manage_channels" }
 ];
 
 function Navbar() {
@@ -30,7 +31,10 @@ function Navbar() {
   } = (useAuth() as any) || {};
 
   const logout = () => {
-    localStorage.clear();
+  localStorage.removeItem('authToken');
+  localStorage.removeItem('role');
+  localStorage.removeItem('username');
+  localStorage.removeItem('permissions');
     setToken?.(null);
     setRole?.(null);
     setUsername?.(null);

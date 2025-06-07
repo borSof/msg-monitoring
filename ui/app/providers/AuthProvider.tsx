@@ -5,14 +5,12 @@ import React, {
   useState, useEffect
 } from 'react'
 
-/* ───────── константи ───────── */
 const LS_TOKEN = 'authToken'
 const LS_ROLE  = 'role'
 const LS_USER  = 'username'
 const LS_PERM  = 'permissions'
 
-/* ───────── helpers ─────────── */
-function decodeJwt (token: string) {
+function decodeJwt(token: string) {
   try {
     const [, base64Url] = token.split('.')
     const json = atob(base64Url.replace(/-/g, '+').replace(/_/g, '/'))
@@ -20,7 +18,6 @@ function decodeJwt (token: string) {
   } catch { return null }
 }
 
-/* ───────── контекст ────────── */
 interface AuthCtx {
   token: string | null
   role:  string | null
@@ -30,63 +27,99 @@ interface AuthCtx {
   setRole:        (r: string|null) => void
   setUsername:    (u: string|null) => void
   setPermissions: (p: string[])    => void
+  logout:         () => void
 }
 const AuthContext = createContext<AuthCtx>(null!)
 
 export const useAuth = () => useContext(AuthContext)
 
-/* ───────── provider ────────── */
-export function AuthProvider ({ children }:{children:React.ReactNode}) {
+export function AuthProvider({ children }:{children:React.ReactNode}) {
+  // ЛОГ: всеки път, когато този компонент се mount-ва
+  console.log('[AuthProvider] COMPONENT MOUNT', new Date());
+
   const [token, setToken]             = useState<string|null>(null)
   const [role, setRole]               = useState<string|null>(null)
   const [username, setUsername]       = useState<string|null>(null)
   const [permissions, setPermissions] = useState<string[]>([])
 
-  /* ---------- 1. четем localStorage само веднъж ---------- */
+  // 1. Зареждаме auth данните от localStorage при mount
   useEffect(() => {
-    if (typeof window === 'undefined') return        // SSR guard
-    setToken(       localStorage.getItem(LS_TOKEN))
-    setRole(        localStorage.getItem(LS_ROLE))
-    setUsername(    localStorage.getItem(LS_USER))
-    setPermissions(JSON.parse(localStorage.getItem(LS_PERM) || '[]'))
-  }, [])
+    if (typeof window === 'undefined') return;
+    const tk  = localStorage.getItem(LS_TOKEN)
+    const rl  = localStorage.getItem(LS_ROLE)
+    const usr = localStorage.getItem(LS_USER)
+    const prm = JSON.parse(localStorage.getItem(LS_PERM) || '[]')
 
-  /* ---------- 2. пазим state-а обратно в localStorage ---------- */
+    console.log('[AuthProvider] Load from localStorage:', {
+      token: tk, role: rl, username: usr, permissions: prm
+    })
+
+    setToken(tk)
+    setRole(rl)
+    setUsername(usr)
+    setPermissions(prm)
+  }, []);
+
+  // 2. Синхронизираме state с localStorage и ЛОГВАМЕ промените
   useEffect(() => {
     token ? localStorage.setItem(LS_TOKEN, token)
           : localStorage.removeItem(LS_TOKEN)
+    console.log('[AuthProvider] token set:', token)
   }, [token])
 
   useEffect(() => {
-    role  ? localStorage.setItem(LS_ROLE, role)
-          : localStorage.removeItem(LS_ROLE)
+    role ? localStorage.setItem(LS_ROLE, role)
+         : localStorage.removeItem(LS_ROLE)
+    console.log('[AuthProvider] role set:', role)
   }, [role])
 
   useEffect(() => {
     username ? localStorage.setItem(LS_USER, username)
              : localStorage.removeItem(LS_USER)
+    console.log('[AuthProvider] username set:', username)
   }, [username])
 
   useEffect(() => {
     localStorage.setItem(LS_PERM, JSON.stringify(permissions))
+    console.log('[AuthProvider] permissions set:', permissions)
   }, [permissions])
 
-  /* ---------- 3. auto-logout при изтекъл токен ---------- */
+  // 3. Auto-logout ако JWT е изтекъл
   useEffect(() => {
-    if (!token) return
+    if (!token) {
+      console.log('[AuthProvider] No token in state.');
+      return
+    }
     const dec = decodeJwt(token)
-    if (!dec?.exp) return
-    const msLeft = dec.exp * 1000 - Date.now()
-    if (msLeft <= 0) return logout()
+    console.log('[AuthProvider] Decoded token:', dec)
 
-    const t = setTimeout(logout, msLeft)
+    if (!dec?.exp) {
+      console.log('[AuthProvider] Token has no exp, skipping auto-logout');
+      return
+    }
+    const msLeft = dec.exp * 1000 - Date.now()
+    console.log('[AuthProvider] Token msLeft:', msLeft)
+
+    if (msLeft <= 0) {
+      console.log('[AuthProvider] Token expired, auto-logout!');
+      logout()
+      return
+    }
+    const t = setTimeout(() => {
+      console.log('[AuthProvider] Token expired (timeout), auto-logout!')
+      logout()
+    }, msLeft)
     return () => clearTimeout(t)
   }, [token])
 
-  /* ---------- helpers ---------- */
   function logout () {
+    console.log('[AuthProvider] LOGOUT!', new Date());
     setToken(null); setRole(null); setUsername(null); setPermissions([])
-    localStorage.clear()
+    // Само auth ключове! Не трий localStorage.clear()
+    localStorage.removeItem(LS_TOKEN)
+    localStorage.removeItem(LS_ROLE)
+    localStorage.removeItem(LS_USER)
+    localStorage.removeItem(LS_PERM)
     if (typeof window !== 'undefined') window.location.href = '/login'
   }
 
@@ -95,7 +128,8 @@ export function AuthProvider ({ children }:{children:React.ReactNode}) {
       token, setToken,
       role, setRole,
       username, setUsername,
-      permissions, setPermissions
+      permissions, setPermissions,
+      logout
     }}>
       {children}
     </AuthContext.Provider>

@@ -1,6 +1,6 @@
 'use client'
 import {
-  Box, Heading, Input, Button, Flex, Text, Select, Switch, Spinner, Badge // ← ДОБАВИ Badge!
+  Box, Heading, Input, Button, Flex, Text, Select, Switch, Spinner, Badge, FormLabel, useToast
 } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
 import axios from "axios"
@@ -22,6 +22,13 @@ export default function ChannelsPage() {
   })
   const [editId, setEditId] = useState<string | null>(null)
 
+  // AI settings state
+  const [aiEnabled, setAiEnabled] = useState(true)
+  const [aiToken, setAiToken] = useState('')
+  const [aiModel, setAiModel] = useState('facebook/bart-large-mnli')
+  const [aiLoading, setAiLoading] = useState(false)
+  const toast = useToast()
+
   // Зареждане на каналите
   async function loadChannels() {
     setLoading(true)
@@ -31,17 +38,54 @@ export default function ChannelsPage() {
   }
   useEffect(() => { loadChannels() }, [])
 
+  // AI config зареждане
+  useEffect(() => {
+    axios.get('/api/config/ai').then(r => {
+      setAiEnabled(r.data.aiEnabled)
+      setAiToken(r.data.aiToken)
+      setAiModel(r.data.aiModel)
+    })
+  }, [])
+  // Запази AI конфиг
+  function saveAIConfig() {
+    if (typeof aiToken !== 'string' || aiToken.trim().length === 0) {
+      toast({ title: "Моля въведи валиден HuggingFace API Token", status: "error" });
+      return;
+    }
+
+    if (typeof aiModel !== 'string' || aiModel.trim().length === 0) {
+      toast({ title: "Моля въведи валиден модел (напр. facebook/bart-large-mnli)", status: "error" });
+      return;
+    }
+
+    setAiLoading(true);
+    axios.put('/api/config/ai', {
+      aiEnabled,
+      aiToken: aiToken.trim(),
+      aiModel: aiModel.trim()
+    })
+      .then(() => {
+        setAiLoading(false);
+        toast({ title: "AI настройките са запазени!", status: "success" });
+      })
+      .catch((err) => {
+        setAiLoading(false);
+        toast({ title: "Грешка при запис на AI настройките", status: "error" });
+        console.error("AI save error:", err);
+      });
+  }
+
   // Създаване/редактиране на канал
   async function saveChannel() {
-    if (!form.name || !form.callbackUrl) return alert("Попълни име и URL!")
+    if (!form.name || !form.callbackUrl) return alert("Попълни име и URL!");
     if (editId) {
-      await axios.put('/api/channels/' + editId, form)
+      await axios.put('/api/channels/' + editId, form);
     } else {
-      await axios.post('/api/channels', form)
+      await axios.post('/api/channels', form);
     }
-    setForm({ name: "", callbackUrl: "", format: "json", active: true, triggerOn: "Allowed" })
-    setEditId(null)
-    loadChannels()
+    setForm({ name: "", callbackUrl: "", format: "json", active: true, triggerOn: "Allowed" });
+    setEditId(null);
+    loadChannels();
   }
 
   // Изтриване
@@ -66,6 +110,33 @@ export default function ChannelsPage() {
   return (
     <Box maxW="2xl" mx="auto" p={8}>
       <Heading size="lg" mb={6}>Интеграционни канали (Webhooks)</Heading>
+
+      {/* AI Класификация секция */}
+      <Box borderWidth={1} borderRadius="lg" p={4} mb={6} bg="gray.50">
+        <Heading size="sm" mb={3}>AI Класификация</Heading>
+        <Flex align="center" mb={2} gap={3}>
+          <FormLabel m={0}>AI Enabled</FormLabel>
+          <Switch isChecked={aiEnabled} onChange={e => setAiEnabled(e.target.checked)} />
+        </Flex>
+        <Input
+          placeholder="HuggingFace API Token"
+          value={aiToken}
+          type="password"
+          onChange={e => setAiToken(e.target.value)}
+          mb={2}
+        />
+        <Input
+          placeholder="AI Model (напр. facebook/bart-large-mnli)"
+          value={aiModel}
+          onChange={e => setAiModel(e.target.value)}
+          mb={2}
+        />
+        <Button colorScheme="blue" onClick={saveAIConfig} isLoading={aiLoading}>
+          Запази AI настройките
+        </Button>
+      </Box>
+
+      {/* Форма за добавяне/редактиране на канал */}
       <Box p={4} mb={6} borderWidth={1} borderRadius="lg">
         <Flex gap={2} mb={2}>
           <Input placeholder="Име" value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />

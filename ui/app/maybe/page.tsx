@@ -1,5 +1,6 @@
 'use client'
 
+import React from "react";
 import { useAuth } from "../providers/AuthProvider"
 import {
   Box, Heading, List, ListItem, Flex, Text, Icon, Button, Spinner, useColorModeValue
@@ -16,8 +17,8 @@ interface Message {
   status: string
 }
 
-const renderParsed = (obj: any, prefix = ''): JSX.Element[] => {
-  const out: JSX.Element[] = []
+const renderParsed = (obj: any, prefix = ''): React.ReactElement[] => {
+  const out: React.ReactElement[] = []
   for (const k in obj) {
     const path = prefix ? `${prefix}.${k}` : k
     if (typeof obj[k] === 'object' && obj[k] !== null) {
@@ -56,15 +57,14 @@ export default function MaybePage() {
     enabled: checked,
   })
 
-  const mutation = useMutation({
-    mutationFn: ({ id, status }: { id: string, status: string }) =>
-      axios.patch(`/api/messages/${id}/status`, { status }),
-    onSuccess: () => {
-      queryClient.invalidateQueries(['maybe'])
-      queryClient.invalidateQueries(['messages'])
-    }
-  })
-
+const mutation = useMutation({
+  mutationFn: ({ id, status }: { id: string, status: string }) =>
+    axios.patch(`/api/messages/${id}/status`, { status }),
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['maybe'] })
+    queryClient.invalidateQueries({ queryKey: ['messages'] })
+  }
+})
   const boxBg = useColorModeValue("white", "gray.800")
   const headingColor = useColorModeValue("gray.800", "gray.100")
 

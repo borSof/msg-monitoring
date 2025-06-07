@@ -132,6 +132,27 @@ app.delete('/api/channels/:id', async (req, res) => {
   await Channel.findByIdAndDelete(req.params.id);
   res.json({ message: "Channel deleted" });
 });
+// GET current AI config
+app.get('/api/config/ai', async (req, res) => {
+  const config = await SystemConfig.findOne() || {};
+  res.json({
+    aiEnabled: config.aiEnabled ?? true,
+    aiToken: config.aiToken ?? '',
+    aiModel: config.aiModel ?? 'facebook/bart-large-mnli'
+  });
+});
+
+// PUT update AI config
+app.put('/api/config/ai', async (req, res) => {
+  let config = await SystemConfig.findOne();
+  if (!config) config = new SystemConfig();
+  if (req.body.aiEnabled !== undefined) config.aiEnabled = req.body.aiEnabled;
+  if (req.body.aiModel !== undefined) config.aiModel = req.body.aiModel;
+  if (req.body.aiToken) config.aiToken = req.body.aiToken; // само ако е подаден!
+  await config.save();
+  res.json({ success: true });
+});
+
 // === USER MANAGEMENT API (CRUD) ===
 
 // GET: всички потребители (production: сложи проверка за роля!)
@@ -378,15 +399,51 @@ app.post('/api/messages', async (req, res) => {
   }
 });
 
-// GET all messages
+// GET /api/messages/paged?skip=0&limit=20&sort=receivedAt&dir=desc&status=Maybe
+app.get('/api/messages/paged', async (req, res) => {
+  const {
+    skip = 0,
+    limit = 20,
+    sort = 'receivedAt',
+    dir = 'desc',
+    status,
+    matchedRule,
+    tag,
+    q // за търсене (по-късно)
+  } = req.query;
+
+  const filter = {};
+  if (status) filter.status = status;
+  if (matchedRule) filter.matchedRule = matchedRule;
+  if (tag) filter.tags = tag;
+
+  // Ако искаш full-text search:
+  // if (q) filter['parsed.message.text'] = { $regex: q, $options: 'i' };
+
+  const sortObj = { [sort]: dir === 'asc' ? 1 : -1 };
+
+  const [total, messages] = await Promise.all([
+    Message.countDocuments(filter),
+    Message.find(filter)
+      .sort(sortObj)
+      .skip(Number(skip))
+      .limit(Number(limit))
+  ]);
+  res.json({ total, messages });
+});
+
+// GET /api/messages?page=1&limit=50
 app.get('/api/messages', async (req, res) => {
-  try {
-    const all = await Message.find().sort({ receivedAt: -1 });
-    res.json(all);
-  } catch (e) {
-    errorLog(e, "Error fetching all messages");
-    res.status(500).json({ error: 'Internal server error' });
-  }
+  const page = Math.max(parseInt(req.query.page) || 1, 1);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500); // Макс 500 за защита
+  const skip = (page - 1) * limit;
+
+  const [messages, total] = await Promise.all([
+    Message.find().sort({ receivedAt: -1 }).skip(skip).limit(limit),
+    Message.countDocuments()
+  ]);
+
+  res.json({ messages, total, page, limit });
 });
 
 app.patch('/api/messages/:id/status', async (req, res) => {
@@ -394,39 +451,28 @@ app.patch('/api/messages/:id/status', async (req, res) => {
   if (!status || !["Allowed", "Forbidden", "Maybe"].includes(status))
     return res.status(400).json({ error: "Invalid status" });
 
-  const updated = await Message.findByIdAndUpdate(
-    req.params.id,
-    { status: status },
-    { new: true }
-  );
-
-  if (!updated) return res.status(404).json({ error: "Message not found" });
-
-  // --- WEBHOOK LOGIC ---
-  const channels = await Channel.find({ active: true, triggerOn: status });
-  for (const ch of channels) {
-    try {
-      await axios.post(ch.callbackUrl, {
-        status,
-        id: updated._id,
-        tags: updated.tags,
-        matchedRule: updated.matchedRule,
-        parsed: updated.parsed,
-        rawXml: updated.rawXml,
-        receivedAt: updated.receivedAt
-      });
-      systemLog("WEBHOOK_SENT", `Sent to ${ch.callbackUrl} status=${status}`);
-    } catch (e) {
-      errorLog(e, `Webhook send failed: ${ch.callbackUrl}`);
+  try {
+    const updated = await Message.findByIdAndUpdate(
+      req.params.id,
+      { status: status },
+      { new: true }
+    );
+    if (!updated) {
+      errorLog("PATCH_MESSAGE_STATUS", `Message ${req.params.id} not found`);
+      return res.status(404).json({ error: "Message not found" });
     }
+    systemLog("PATCH_MESSAGE_STATUS", `Status of message ${req.params.id} updated to ${status}`);
+    res.json({ message: "Status updated", id: req.params.id, status });
+  } catch (e) {
+    errorLog(e, "Error updating message status");
+    res.status(500).json({ error: 'Internal server error' });
   }
-
-  res.json({ message: "Status updated", id: req.params.id, status });
 });
 
 // GET maybe-only messages
 app.get('/api/messages/maybe', async (req, res) => {
   try {
+    systemLog("GET_MAYBE_MESSAGES", "Fetching messages with status 'Maybe'");
     const m = await Message.find({ status: 'Maybe' }).sort({ receivedAt: -1 });
     res.json(m);
   } catch (e) {
@@ -434,7 +480,6 @@ app.get('/api/messages/maybe', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 // CRUD for rules
 app.get('/api/rules', async (req, res) => {
   const rules = await Rule.find().sort({ priority: 1, createdAt: 1 });

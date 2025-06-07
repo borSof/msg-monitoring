@@ -18,9 +18,8 @@ export default function LoginPage() {
   const toast  = useToast();
   const { setToken, setRole, setUsername: setUser, setPermissions } = useAuth() as any;
 
-  /* ───── ако вече има токен, пренасочваме веднъж ───── */
   useEffect(() => {
-    const token = localStorage.getItem('authToken');    // ⬅️  същият ключ
+    const token = localStorage.getItem('authToken');
     if (!token) return;
 
     const perms = JSON.parse(localStorage.getItem('permissions') || '[]');
@@ -34,7 +33,7 @@ export default function LoginPage() {
     ].find(p => perms.includes(p.perm));
 
     if (landing) router.replace(landing.href);
-  }, []);                         // ← празен масив → само 1 път
+  }, []);
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -44,13 +43,11 @@ export default function LoginPage() {
     try {
       const { data } = await axios.post('/api/login', { username, password });
 
-      // записваме ВСИЧКО с един и същи ключ
       localStorage.setItem('authToken'  , data.token);
       localStorage.setItem('role'       , data.role);
       localStorage.setItem('username'   , data.username);
       localStorage.setItem('permissions', JSON.stringify(data.permissions || []));
 
-      // context
       setToken(data.token);
       setRole (data.role);
       setUser (data.username);
@@ -58,7 +55,7 @@ export default function LoginPage() {
 
       toast({ title: 'Login success', status: 'success' });
 
-      router.push('/messages');            // прост landing; или провери perms
+      router.push('/messages');
     } catch (err: any) {
       setError(err.response?.data?.error || 'Login error');
     } finally {

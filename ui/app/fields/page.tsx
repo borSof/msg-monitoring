@@ -2,7 +2,9 @@
 
 import { useAuth } from "../providers/AuthProvider"
 import React, { useState, useEffect } from "react"
-import { Box, Heading, Input, Button, Flex, Text, useToast, Spinner } from "@chakra-ui/react"
+import {
+  Box, Heading, Input, Button, Flex, Text, useToast, Spinner, Badge, Tooltip, useColorModeValue
+} from "@chakra-ui/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import axios from "axios"
 import { useRouter } from "next/navigation"
@@ -13,7 +15,6 @@ export default function FieldsPage() {
   const router = useRouter()
   const { token, permissions } = useAuth() as any
 
-  // Guard: чак когато потребителят има права, page се рендира
   const [checked, setChecked] = useState(false)
   useEffect(() => {
     if (!token) {
@@ -25,11 +26,10 @@ export default function FieldsPage() {
     }
   }, [token, permissions, router])
 
-  // Винаги декларирай всички hooks!
   const { data: visibleFields, isLoading } = useQuery<string[]>({
     queryKey: ['visibleFields'],
     queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
-    enabled: checked, // само ако е минал guard-а
+    enabled: checked,
   })
 
   const { data: allFields, isLoading: isLoadingAllFields } = useQuery<string[]>({
@@ -38,11 +38,9 @@ export default function FieldsPage() {
     enabled: checked,
   })
 
-  const [input, setInput] = useState("")
   const [fields, setFields] = useState<string[]>([])
   const [search, setSearch] = useState("")
 
-  // Sync when data is loaded
   useEffect(() => {
     if (visibleFields) setFields(visibleFields)
   }, [visibleFields])
@@ -52,82 +50,112 @@ export default function FieldsPage() {
       axios.put('/api/config/visible-fields', { visibleFields: fields }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visibleFields'] })
-      toast({ title: "Fields updated!", status: "success" })
+      toast({ title: "Fields updated!", status: "success", position: "top" })
+    },
+    onError: () => {
+      toast({ title: "Failed to update fields", status: "error", position: "top" })
     }
   })
 
-  // Guard spinner
+  const cardBg = useColorModeValue('gray.50', 'gray.800')
+
   if (!checked) return <Box p={8}><Spinner size="xl" /></Box>
 
-  // Истинското съдържание:
   return (
     <Box maxW="2xl" mx="auto" p={8}>
-      <Heading size="md" mb={4}>Visible Fields (Custom Fields)</Heading>
+      <Heading size="lg" mb={3}>Customize Visible Fields</Heading>
+      <Text mb={4} color="gray.600">
+        These fields control what parts of the message content are shown on the <b>Messages</b> page.
+      </Text>
 
-      {/* Add custom field manually */}
-      <Flex gap={2} mb={4}>
-        <Input
-          placeholder="Add field, e.g. message.text"
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter" && input.trim()) {
-            setFields(f => Array.from(new Set([...f, input.trim()])))
-            setInput("")
-          }}}
-        />
-        <Button
-          onClick={() => { if (input.trim()) { setFields(f => Array.from(new Set([...f, input.trim()]))) ; setInput("") } }}
-        >Add</Button>
-      </Flex>
-
-      {/* Show all visible fields with remove button */}
-      <Box mb={6}>
-        <Heading size="sm" mb={2}>Current visible fields</Heading>
+      {/* Selected Fields Section */}
+      <Box bg={cardBg} p={4} rounded="md" mb={6} boxShadow="md">
+        <Heading size="sm" mb={3}>Currently Selected Fields</Heading>
         {fields.length === 0 ? (
-          <Text color="gray.500">No visible fields configured.</Text>
+          <Text color="gray.400">No visible fields configured.</Text>
         ) : (
-          fields.map(f => (
-            <Flex key={f} align="center" gap={2} mb={1}>
-              <Text>{f}</Text>
-              <Button size="xs" colorScheme="red" onClick={() =>
-                setFields(fields.filter(x => x !== f))
-              }>Remove</Button>
-            </Flex>
-          ))
+          <Flex gap={2} flexWrap="wrap">
+            {fields.map(f => (
+              <Tooltip label={f} key={f} hasArrow>
+                <Badge
+                  colorScheme="teal"
+                  variant="subtle"
+                  px={3}
+                  py={2}
+                  borderRadius="lg"
+                  fontSize="sm"
+                  mb={1}
+                  display="flex"
+                  alignItems="center"
+                >
+                  <span style={{ maxWidth: 120, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f}</span>
+                  <Button
+                    onClick={() => setFields(fields.filter(x => x !== f))}
+                    size="xs"
+                    ml={2}
+                    colorScheme="red"
+                    variant="ghost"
+                    borderRadius="full"
+                    minW="1.5em"
+                    h="1.5em"
+                    p={0}
+                  >×</Button>
+                </Badge>
+              </Tooltip>
+            ))}
+          </Flex>
         )}
       </Box>
 
-      {/* Save button */}
-      <Button colorScheme="blue" onClick={() => mutation.mutate(fields)} isLoading={mutation.isPending} mb={8}>
-        Save
+      {/* Save Button */}
+      <Button
+        colorScheme="green"
+        mb={8}
+        isDisabled={mutation.isPending || JSON.stringify(visibleFields) === JSON.stringify(fields)}
+        onClick={() => mutation.mutate(fields)}
+        isLoading={mutation.isPending}
+      >
+        Save Changes
       </Button>
 
-      {/* Search and add from all available fields */}
-      <Box>
-        <Heading size="sm" mb={2}>All available fields in messages</Heading>
+      {/* All Available Fields Section */}
+      <Box bg={cardBg} p={4} rounded="md" boxShadow="md">
+        <Heading size="sm" mb={3}>Available Fields</Heading>
         <Input
           placeholder="Search field..."
           value={search}
-          mb={3}
+          mb={4}
           onChange={e => setSearch(e.target.value)}
         />
         {isLoadingAllFields ? (
           <Spinner mt={2} />
         ) : (
-          allFields
-            ?.filter(f => f.toLowerCase().includes(search.toLowerCase()))
-            .map(f => (
-              <Flex key={f} align="center" gap={2} mb={1}>
-                <Text>{f}</Text>
-                <Button size="xs"
-                  isDisabled={fields.includes(f)}
-                  onClick={() => setFields(fs => Array.from(new Set([...fs, f])))}>
-                  Add
-                </Button>
-              </Flex>
-            ))
+          <Flex gap={2} flexWrap="wrap">
+            {allFields
+              ?.filter(f => f.toLowerCase().includes(search.toLowerCase()))
+              .map(f => (
+                <Badge
+                  key={f}
+                  colorScheme={fields.includes(f) ? "gray" : "blue"}
+                  variant={fields.includes(f) ? "subtle" : "solid"}
+                  px={3}
+                  py={2}
+                  borderRadius="lg"
+                  fontSize="sm"
+                  mb={1}
+                  mr={1}
+                  opacity={fields.includes(f) ? 0.5 : 1}
+                  cursor={fields.includes(f) ? "not-allowed" : "pointer"}
+                  onClick={() => !fields.includes(f) && setFields(fs => Array.from(new Set([...fs, f])))}
+                >
+                  {f}
+                </Badge>
+              ))
+            }
+          </Flex>
         )}
       </Box>
     </Box>
   )
 }
+

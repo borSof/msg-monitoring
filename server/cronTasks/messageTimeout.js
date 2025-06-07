@@ -14,11 +14,17 @@ const messageTimeoutTask = () => {
     });
 
     // Ако има съобщения, които трябва да се маркират като "Forbidden"
-    maybeMessages.forEach(async (message) => {
-      message.status = 'Forbidden';  // Променяме статус на "Forbidden"
-      message.tags.push('timeout');  // Добавяме таг за тайм-аут
-      await message.save();  // Записваме промените в базата
-    });
+    for (const message of maybeMessages) {
+      // Сетваме originalStatus само ако не е вече сложено!
+      if (!message.originalStatus) {
+        message.originalStatus = 'Maybe';
+      }
+      message.status = 'Forbidden';           // Променяме статус на "Forbidden"
+      if (!message.tags.includes('timeout')) {
+        message.tags.push('timeout');         // Добавяме таг за тайм-аут
+      }
+      await message.save();                   // Записваме промените в базата
+    }
   });
 };
 

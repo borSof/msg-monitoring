@@ -8,8 +8,9 @@ const MessageSchema = new mongoose.Schema({
     enum: ['Allowed', 'Maybe', 'Forbidden'],
     default: 'Maybe'
   },
-  matchedRule: String, // ✅ добавено
-  tags: [String],      // ако използваш тагове
+  originalStatus: String,
+  matchedRule: String,
+  tags: [String],
   receivedAt: {
     type: Date,
     default: Date.now
