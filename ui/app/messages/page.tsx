@@ -159,22 +159,22 @@ export default function MessagesPage() {
     else if (!canView) router.replace('/no-access');
   }, [token, canView, router]);
 
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['messages', page, pageSize, sortField, sortDir, statusFilter, search],
-    queryFn: () => axios.get('/api/messages/paged', {
-      params: {
-        skip: page * pageSize,
-        limit: pageSize,
-        sort: sortField,
-        dir: sortDir,
-        status: statusFilter || undefined,
-        q: search || undefined
-      }
-    }).then(r => r.data),
-    keepPreviousData: true,
-    staleTime: 10_000,
-    refetchInterval: 4000
-  });
+const { data, isLoading, error } = useQuery({
+  queryKey: ['messages', page, pageSize, sortField, sortDir, statusFilter, search],
+  queryFn: () => axios.get('/api/messages/paged', {
+    params: {
+      skip: page * pageSize,
+      limit: pageSize,
+      sort: sortField,
+      dir: sortDir,
+      status: statusFilter || undefined,
+      q: search || undefined
+    }
+  }).then(r => r.data),
+  placeholderData: (prev) => prev,
+  staleTime: 10_000,
+  refetchInterval: 4000
+});
 
   const { data: visibleFields } = useQuery<string[]>({
     queryKey: ['visibleFields'],
@@ -243,7 +243,7 @@ export default function MessagesPage() {
           <option value="Forbidden">Forbidden</option>
           <option value="Maybe">Maybe</option>
         </Select>
-        {visibleFields?.length > 0 && (
+        {Array.isArray(visibleFields) && visibleFields.length > 0 && (
           <Button size="xs" onClick={() => setShowAll(s => !s)}>
             {showAll ? 'Show Only Selected Fields' : 'Show All Fields'}
           </Button>
@@ -267,7 +267,7 @@ export default function MessagesPage() {
             </Tr>
           </Thead>
           <Tbody>
-            {messages.map(m => (
+            {messages.map((m: any) => (
               <Tr key={m._id} _hover={{ bg: 'gray.50' }}>
                 <Td>
                   {showAll || !visibleFields?.length

@@ -106,10 +106,10 @@ export default function RulesPage() {
         borderColor="gray.200"
         borderRadius="md"
         bg="gray.50"
-        onSubmit={e => {
-          e.preventDefault()
-          createMutation.mutate(form)
-        }}
+onSubmit={(e: React.FormEvent) => {
+  e.preventDefault()
+  createMutation.mutate(form)
+}}
       >
         <Flex gap={4} flexWrap="wrap" mb={4}>
           <FormControl isRequired>
