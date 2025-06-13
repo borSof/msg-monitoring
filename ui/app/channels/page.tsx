@@ -3,7 +3,7 @@ import {
   Box, Heading, Input, Button, Flex, Text, Select, Switch, Spinner, Badge, FormLabel, useToast
 } from "@chakra-ui/react"
 import { useEffect, useState } from "react"
-import axios from "axios"
+import { api } from "../api"
 
 interface Channel {
   _id: string
@@ -32,7 +32,7 @@ export default function ChannelsPage() {
   // Зареждане на каналите
   async function loadChannels() {
     setLoading(true)
-    const res = await axios.get('/api/channels')
+    const res = await api.get('/api/channels')
     setChannels(res.data)
     setLoading(false)
   }
@@ -40,7 +40,7 @@ export default function ChannelsPage() {
 
   // AI config зареждане
   useEffect(() => {
-    axios.get('/api/config/ai').then(r => {
+    api.get('/api/config/ai').then(r => {
       setAiEnabled(r.data.aiEnabled)
       setAiToken(r.data.aiToken)
       setAiModel(r.data.aiModel)
@@ -59,7 +59,7 @@ export default function ChannelsPage() {
     }
 
     setAiLoading(true);
-    axios.put('/api/config/ai', {
+    api.put('/api/config/ai', {
       aiEnabled,
       aiToken: aiToken.trim(),
       aiModel: aiModel.trim()
@@ -79,9 +79,9 @@ export default function ChannelsPage() {
   async function saveChannel() {
     if (!form.name || !form.callbackUrl) return alert("Попълни име и URL!");
     if (editId) {
-      await axios.put('/api/channels/' + editId, form);
+      await api.put('/api/channels/' + editId, form);
     } else {
-      await axios.post('/api/channels', form);
+      await api.post('/api/channels', form);
     }
     setForm({ name: "", callbackUrl: "", format: "json", active: true, triggerOn: "Allowed" });
     setEditId(null);
@@ -91,7 +91,7 @@ export default function ChannelsPage() {
   // Изтриване
   async function deleteChannel(id: string) {
     if (!window.confirm("Сигурен ли си?")) return
-    await axios.delete('/api/channels/' + id)
+    await api.delete('/api/channels/' + id)
     loadChannels()
   }
 

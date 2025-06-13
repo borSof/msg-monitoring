@@ -7,7 +7,7 @@ import {
 } from "@chakra-ui/react"
 import { FaExclamationTriangle, FaCheckCircle, FaTimesCircle } from "react-icons/fa"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import axios from "axios"
+import { api } from "../api"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 
@@ -52,14 +52,14 @@ export default function MaybePage() {
   const queryClient = useQueryClient()
   const { data, isLoading, error } = useQuery<Message[]>({
     queryKey: ['maybe'],
-    queryFn: () => axios.get('/api/messages/maybe').then(r => r.data),
+    queryFn: () => api.get('/api/messages/maybe').then(r => r.data),
     staleTime: 30_000,
     enabled: checked,
   })
 
 const mutation = useMutation({
   mutationFn: ({ id, status }: { id: string, status: string }) =>
-    axios.patch(`/api/messages/${id}/status`, { status }),
+    api.patch(`/api/messages/${id}/status`, { status }),
   onSuccess: () => {
     queryClient.invalidateQueries({ queryKey: ['maybe'] })
     queryClient.invalidateQueries({ queryKey: ['messages'] })

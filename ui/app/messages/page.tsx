@@ -8,7 +8,7 @@ import {
 import { useAuth } from '../providers/AuthProvider';
 import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
-import axios from 'axios';
+import { api } from '../api';
 import { useEffect, useMemo, useState } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer
@@ -161,7 +161,7 @@ export default function MessagesPage() {
 
 const { data, isLoading, error } = useQuery({
   queryKey: ['messages', page, pageSize, sortField, sortDir, statusFilter, search],
-  queryFn: () => axios.get('/api/messages/paged', {
+  queryFn: () => api.get('/api/messages/paged', {
     params: {
       skip: page * pageSize,
       limit: pageSize,
@@ -178,14 +178,14 @@ const { data, isLoading, error } = useQuery({
 
   const { data: visibleFields } = useQuery<string[]>({
     queryKey: ['visibleFields'],
-    queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
+    queryFn: () => api.get('/api/config/visible-fields').then(r => r.data),
     staleTime: 60_000
   });
 
   // За чарта – може да ползваш всички, ако искаш история
   const { data: chartData } = useQuery({
     queryKey: ['chart-messages'],
-    queryFn: () => axios.get('/api/messages/paged', {
+    queryFn: () => api.get('/api/messages/paged', {
       params: { skip: 0, limit: 5000 }
     }).then(r => aggregateMessagesPerDay(r.data.messages)),
     staleTime: 60000,

@@ -6,7 +6,7 @@ import {
   useToast, Text,
 } from '@chakra-ui/react';
 import { useRouter } from 'next/navigation';
-import axios from 'axios';
+import { api } from '../api';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function LoginPage() {
@@ -41,7 +41,7 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const { data } = await axios.post('/api/login', { username, password });
+      const { data } = await api.post('/api/login', { username, password });
 
       localStorage.setItem('authToken'  , data.token);
       localStorage.setItem('role'       , data.role);

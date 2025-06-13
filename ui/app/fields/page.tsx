@@ -6,7 +6,7 @@ import {
   Box, Heading, Input, Button, Flex, Text, useToast, Spinner, Badge, Tooltip, useColorModeValue
 } from "@chakra-ui/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import axios from "axios"
+import { api } from "../api"
 import { useRouter } from "next/navigation"
 
 export default function FieldsPage() {
@@ -28,13 +28,13 @@ export default function FieldsPage() {
 
   const { data: visibleFields, isLoading } = useQuery<string[]>({
     queryKey: ['visibleFields'],
-    queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
+    queryFn: () => api.get('/api/config/visible-fields').then(r => r.data),
     enabled: checked,
   })
 
   const { data: allFields, isLoading: isLoadingAllFields } = useQuery<string[]>({
     queryKey: ['allMessageFields'],
-    queryFn: () => axios.get('/api/messages/fields').then(r => r.data),
+    queryFn: () => api.get('/api/messages/fields').then(r => r.data),
     enabled: checked,
   })
 
@@ -47,7 +47,7 @@ export default function FieldsPage() {
 
   const mutation = useMutation({
     mutationFn: (fields: string[]) =>
-      axios.put('/api/config/visible-fields', { visibleFields: fields }),
+      api.put('/api/config/visible-fields', { visibleFields: fields }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visibleFields'] })
       toast({ title: "Fields updated!", status: "success", position: "top" })

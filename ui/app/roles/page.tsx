@@ -5,7 +5,7 @@ import {
   Box, Heading, Input, Button, Flex, Text, Badge, IconButton, List, ListItem, useToast, Spinner
 } from "@chakra-ui/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import axios from "axios"
+import { api } from "../api"
 import { FaTrash, FaPlus } from "react-icons/fa"
 import { useAuth } from "../providers/AuthProvider"
 import { useRouter } from "next/navigation"
@@ -31,7 +31,7 @@ export default function RolesPage() {
   // useQuery трябва да се ИЗВИКВА ВИНАГИ, но да се "disable"-не, ако не е минал guard-а!
   const { data: roles, isLoading } = useQuery<any[]>({
     queryKey: ['roles'],
-    queryFn: () => axios.get('/api/roles').then(r => r.data),
+    queryFn: () => api.get('/api/roles').then(r => r.data),
     staleTime: 10_000,
     enabled: checked, // заявка само ако е минал guard-а
   })
@@ -44,8 +44,8 @@ export default function RolesPage() {
   const saveRole = useMutation({
     mutationFn: (data: { name: string, permissions: string[] }) =>
       editId
-        ? axios.put('/api/roles/' + editId, data)
-        : axios.post('/api/roles', data),
+        ? api.put('/api/roles/' + editId, data)
+        : api.post('/api/roles', data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['roles'] })
       setEditId(null)
@@ -56,7 +56,7 @@ export default function RolesPage() {
   })
 
   const deleteRole = useMutation({
-    mutationFn: (id: string) => axios.delete('/api/roles/' + id),
+    mutationFn: (id: string) => api.delete('/api/roles/' + id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['roles'] })
       toast({ title: "Role deleted", status: "info" })

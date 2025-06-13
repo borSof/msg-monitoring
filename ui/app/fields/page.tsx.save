@@ -3,19 +3,19 @@
 import React, { useState, useEffect } from "react"
 import { Box, Heading, Input, Button, Flex, Text, useToast, Spinner } from "@chakra-ui/react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import axios from "axios"
+import { api } from "../api"
 
 export default function FieldsPage() {
   const toast = useToast()
   const queryClient = useQueryClient()
   const { data: visibleFields, isLoading } = useQuery<string[]>({
     queryKey: ['visibleFields'],
-    queryFn: () => axios.get('/api/config/visible-fields').then(r => r.data),
+    queryFn: () => api.get('/api/config/visible-fields').then(r => r.data),
   })
 
   const { data: allFields, isLoading: isLoadingAllFields } = useQuery<string[]>({
     queryKey: ['allMessageFields'],
-    queryFn: () => axios.get('/api/messages/fields').then(r => r.data),
+    queryFn: () => api.get('/api/messages/fields').then(r => r.data),
   })
 
   const [input, setInput] = useState("")
@@ -29,7 +29,7 @@ export default function FieldsPage() {
 
   const mutation = useMutation({
     mutationFn: (fields: string[]) =>
-      axios.put('/api/config/visible-fields', { visibleFields: fields }),
+      api.put('/api/config/visible-fields', { visibleFields: fields }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['visibleFields'] })
       toast({ title: "Fields updated!", status: "success" })

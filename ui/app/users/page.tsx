@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import { useAuth } from "../providers/AuthProvider"
 import { useRouter } from "next/navigation"
 import { Box, Heading, Button, Flex, Text, Input, Select, Switch, Spinner } from "@chakra-ui/react"
-import axios from "axios"
+import { api } from "../api"
 
 interface User {
   _id: string
@@ -35,7 +35,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (!checked) return
-    axios.get('/api/roles').then(res => {
+    api.get('/api/roles').then(res => {
       const allRoles = res.data.map((r: any) => r.name)
       setRoles(allRoles)
       setNewUser(u => ({ ...u, role: allRoles[0] || "" }))
@@ -45,26 +45,26 @@ export default function UsersPage() {
 
   async function loadUsers() {
     setLoading(true)
-    const res = await axios.get('/api/users')
+    const res = await api.get('/api/users')
     setUsers(res.data)
     setLoading(false)
   }
 
   async function addUser() {
     if (!newUser.username || !newUser.password) return alert("Въведи потребител и парола!")
-    await axios.post('/api/users', newUser)
+    await api.post('/api/users', newUser)
     setNewUser({ username: "", password: "", role: roles[0] || "", active: true })
     loadUsers()
   }
 
   async function deleteUser(id: string) {
     if (!window.confirm("Сигурен ли си?")) return
-    await axios.delete('/api/users/' + id)
+    await api.delete('/api/users/' + id)
     loadUsers()
   }
 
   async function updateUser(u: User, key: string, value: any) {
-    await axios.put('/api/users/' + u._id, { ...u, [key]: value })
+    await api.put('/api/users/' + u._id, { ...u, [key]: value })
     loadUsers()
   }
 

@@ -11,7 +11,7 @@ import {
   useToast,
   Text
 } from '@chakra-ui/react';
-import axios from 'axios';
+import { api } from '../api';
 import { useAuth } from '../providers/AuthProvider';
 
 export default function Settings() {
@@ -38,10 +38,9 @@ export default function Settings() {
     setError('');
 
     try {
-      await axios.put(
+      await api.put(
         '/api/users/self/change-password',
-        { oldPassword: oldPw, newPassword: newPw },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { oldPassword: oldPw, newPassword: newPw }
       );
 
       toast({

@@ -4,6 +4,7 @@ import React, {
   createContext, useContext,
   useState, useEffect
 } from 'react'
+import { setAuthToken } from '../api'
 
 const LS_TOKEN = 'authToken'
 const LS_ROLE  = 'role'
@@ -64,6 +65,7 @@ export function AuthProvider({ children }:{children:React.ReactNode}) {
   useEffect(() => {
     token ? localStorage.setItem(LS_TOKEN, token)
           : localStorage.removeItem(LS_TOKEN)
+    setAuthToken(token)
     console.log('[AuthProvider] token set:', token)
   }, [token])
 
@@ -115,6 +117,7 @@ export function AuthProvider({ children }:{children:React.ReactNode}) {
   function logout () {
     console.log('[AuthProvider] LOGOUT!', new Date());
     setToken(null); setRole(null); setUsername(null); setPermissions([])
+    setAuthToken(null)
     // Само auth ключове! Не трий localStorage.clear()
     localStorage.removeItem(LS_TOKEN)
     localStorage.removeItem(LS_ROLE)

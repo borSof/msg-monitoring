@@ -7,7 +7,7 @@ import {
 } from '@chakra-ui/react'
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import axios from 'axios'
+import { api } from '../api'
 import { useState, useEffect } from 'react'
 import { useRouter } from "next/navigation"
 
@@ -61,7 +61,7 @@ export default function RulesPage() {
 
   const { data: rules, isLoading } = useQuery<Rule[]>({
     queryKey: ['rules'],
-    queryFn: () => axios.get('/api/rules').then(res => res.data),
+    queryFn: () => api.get('/api/rules').then(res => res.data),
     enabled: checked
   })
 
@@ -73,7 +73,7 @@ export default function RulesPage() {
   })
 
   const createMutation = useMutation({
-    mutationFn: (newRule: Partial<Rule>) => axios.post('/api/rules', newRule),
+    mutationFn: (newRule: Partial<Rule>) => api.post('/api/rules', newRule),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rules'] })
       toast({ title: 'Rule added!', status: 'success', duration: 1500 })
@@ -87,7 +87,7 @@ export default function RulesPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => axios.delete(`/api/rules/${id}`),
+    mutationFn: (id: string) => api.delete(`/api/rules/${id}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rules'] })
       toast({ title: 'Rule deleted!', status: 'info', duration: 1200 })

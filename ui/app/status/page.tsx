@@ -3,7 +3,7 @@
 import { useAuth } from "../providers/AuthProvider"
 import { Box, Heading, Flex, Text, Badge, SimpleGrid, Spinner, Code } from "@chakra-ui/react"
 import { useQuery } from "@tanstack/react-query"
-import axios from "axios"
+import { api } from "../api"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 
@@ -26,7 +26,7 @@ export default function StatusPage() {
   // Винаги извикай useQuery — използвай enabled: checked
   const { data, isLoading, error } = useQuery({
     queryKey: ['status'],
-    queryFn: () => axios.get('/api/status').then(r => r.data),
+    queryFn: () => api.get('/api/status').then(r => r.data),
     refetchInterval: 10_000,
     enabled: checked // ТУК Е КЛЮЧА! useQuery не стреля докато няма достъп
   })
