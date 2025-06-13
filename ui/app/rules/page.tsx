@@ -17,17 +17,28 @@ interface Condition {
   value: string
 }
 
+interface AggregateCondition {
+  field: string
+  keyField: string
+  period: string
+  unique: boolean
+  operator: string
+  threshold: number
+}
+
 interface Rule {
   _id: string
   name: string
   logic: string
   conditions: Condition[]
+  aggregateConditions?: AggregateCondition[]
   action: string
   priority: number
   tag?: string
 }
 
 const OPERATORS = ['contains', 'not contains', 'equals', 'regex', 'gt', 'lt']
+const AGG_OPERATORS = ['lt', 'lte', 'eq', 'gte', 'gt']
 const ACTIONS = ['Allowed', 'Forbidden', 'Tag', 'Maybe']
 const LOGICS = ['AND', 'OR']
 
@@ -54,8 +65,11 @@ export default function RulesPage() {
     enabled: checked
   })
 
+  // ДОБАВЯМЕ aggregateConditions
   const [form, setForm] = useState<Partial<Rule>>({
-    name: '', logic: 'AND', action: 'Allowed', priority: 1, tag: '', conditions: [{ field: '', operator: 'contains', value: '' }]
+    name: '', logic: 'AND', action: 'Allowed', priority: 1, tag: '',
+    conditions: [{ field: '', operator: 'contains', value: '' }],
+    aggregateConditions: []
   })
 
   const createMutation = useMutation({
@@ -63,7 +77,11 @@ export default function RulesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['rules'] })
       toast({ title: 'Rule added!', status: 'success', duration: 1500 })
-      setForm({ name: '', logic: 'AND', action: 'Allowed', priority: 1, tag: '', conditions: [{ field: '', operator: 'contains', value: '' }] })
+      setForm({
+        name: '', logic: 'AND', action: 'Allowed', priority: 1, tag: '',
+        conditions: [{ field: '', operator: 'contains', value: '' }],
+        aggregateConditions: []
+      })
     },
     onError: (err: any) => toast({ title: err.response?.data?.error || 'Error!', status: 'error' }),
   })
@@ -92,6 +110,28 @@ export default function RulesPage() {
     setForm(f => ({ ...f, conditions: updated }))
   }
 
+  // --- aggregateConditions helpers ---
+  const updateAggCondition = (index: number, field: keyof AggregateCondition, value: any) => {
+    const updated = [...(form.aggregateConditions || [])]
+    updated[index] = { ...updated[index], [field]: value }
+    setForm(f => ({ ...f, aggregateConditions: updated }))
+  }
+
+  const addAggCondition = () => {
+    setForm(f => ({
+      ...f,
+      aggregateConditions: [...(f.aggregateConditions || []), {
+        field: '', keyField: '', period: '1d', unique: true, operator: 'gt', threshold: 1
+      }]
+    }))
+  }
+
+  const removeAggCondition = (index: number) => {
+    const updated = [...(form.aggregateConditions || [])]
+    updated.splice(index, 1)
+    setForm(f => ({ ...f, aggregateConditions: updated }))
+  }
+
   if (!checked) {
     return <Flex justify="center" p={10}><Spinner size="xl" /></Flex>
   }
@@ -106,12 +146,12 @@ export default function RulesPage() {
         borderColor="gray.200"
         borderRadius="md"
         bg="gray.50"
-onSubmit={(e: React.FormEvent) => {
-  e.preventDefault()
-  createMutation.mutate(form)
-}}
+        onSubmit={(e: React.FormEvent) => {
+          e.preventDefault()
+          createMutation.mutate(form)
+        }}
       >
-        <Flex gap={4} flexWrap="wrap" mb={4}>
+ <Flex gap={4} flexWrap="wrap" mb={4}>
           <FormControl isRequired>
             <FormLabel>Name</FormLabel>
             <Input value={form.name || ''} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
@@ -136,10 +176,10 @@ onSubmit={(e: React.FormEvent) => {
           </FormControl>
           <FormControl isRequired>
             <FormLabel>Priority</FormLabel>
-            <Input type="number" min={1} value={form.priority || 1} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
+            <Input type="number" min={1} onChange={e => setForm(f => ({ ...f, priority: Number(e.target.value) }))} />
           </FormControl>
         </Flex>
-
+      {/* STANDARD CONDITIONS */}
         {form.conditions?.map((cond, idx) => (
           <Flex key={idx} gap={4} align="end" mb={3}>
             <FormControl isRequired>
@@ -159,13 +199,50 @@ onSubmit={(e: React.FormEvent) => {
             <IconButton aria-label="Remove condition" icon={<DeleteIcon />} onClick={() => removeCondition(idx)} />
           </Flex>
         ))}
-
         <Button onClick={addCondition} leftIcon={<AddIcon />} mb={4}>Add Condition</Button>
+    {/* AGGREGATE CONDITIONS */}
+        <Heading size="sm" mt={4} mb={2}>Aggregate Conditions</Heading>
+        {form.aggregateConditions?.map((ac, idx) => (
+          <Flex key={idx} gap={4} align="end" mb={3}>
+            <FormControl isRequired>
+              <FormLabel>Field</FormLabel>
+              <Input value={ac.field} onChange={e => updateAggCondition(idx, 'field', e.target.value)} />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Group By</FormLabel>
+              <Input value={ac.keyField} onChange={e => updateAggCondition(idx, 'keyField', e.target.value)} />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Period</FormLabel>
+              <Input value={ac.period} onChange={e => updateAggCondition(idx, 'period', e.target.value)} />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Operator</FormLabel>
+              <Select value={ac.operator} onChange={e => updateAggCondition(idx, 'operator', e.target.value)}>
+                {AGG_OPERATORS.map(op => <option key={op}>{op}</option>)}
+              </Select>
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Threshold</FormLabel>
+              <Input type="number" value={ac.threshold} onChange={e => updateAggCondition(idx, 'threshold', Number(e.target.value))} />
+            </FormControl>
+            <FormControl isRequired>
+              <FormLabel>Unique?</FormLabel>
+              <Select value={ac.unique ? 'true' : 'false'} onChange={e => updateAggCondition(idx, 'unique', e.target.value === 'true')}>
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </Select>
+            </FormControl>
+            <IconButton aria-label="Remove aggregate" icon={<DeleteIcon />} onClick={() => removeAggCondition(idx)} />
+          </Flex>
+        ))}
+        <Button onClick={addAggCondition} leftIcon={<AddIcon />} mb={4}>Add Aggregate Condition</Button>
+
         <Button type="submit" colorScheme="blue" isLoading={createMutation.isPending}>Add Rule</Button>
       </Box>
 
       {isLoading ? (
-        <Flex justify="center" p={10}><Spinner /></Flex>
+        <Flex justify="center" p={10}><Spinner size="xl" /></Flex>
       ) : (
         <Table size="sm" bg="white" borderRadius="lg" boxShadow="md">
           <Thead bg="gray.200">
@@ -188,6 +265,11 @@ onSubmit={(e: React.FormEvent) => {
                   <ul>
                     {rule.conditions.map((c, i) => (
                       <li key={i}><strong>{c.field}</strong> {c.operator} <em>{c.value}</em></li>
+                    ))}
+                    {rule.aggregateConditions?.map((a, i) => (
+                      <li key={`agg-${i}`}>
+                        <strong>{a.keyField}</strong> → count({a.field}) {a.operator} {a.threshold} in {a.period} [{a.unique ? 'unique' : 'all'}]
+                      </li>
                     ))}
                   </ul>
                 </Td>

@@ -7,6 +7,7 @@ const xml2js = require('xml2js');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
+const { checkAggregateCondition } = require('./utils/aggregateChecker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -281,8 +282,7 @@ app.get('/api/status', async (req, res) => {
 // /ping endpoint
 app.get('/ping', (req, res) => res.send('pong'));
 
-// POST /api/messages with Rule Engine
-// POST /api/messages with Rule Engine + AI classification
+// POST /api/messages with Rule Engine + optional AI classification
 app.post('/api/messages', async (req, res) => {
   try {
     let parsed = req.body;
@@ -297,7 +297,7 @@ app.post('/api/messages', async (req, res) => {
     const rules = await Rule.find().sort({ priority: 1, createdAt: 1 });
     const tags = [];
     let matchedRuleName = null;
-    let finalAction = 'Maybe';
+    let finalAction = 'Allowed'; //.env?
 
     // ----- Rule Engine -----
     const getField = (obj, path) =>
@@ -319,42 +319,52 @@ app.post('/api/messages', async (req, res) => {
     }
 
     for (const r of rules) {
-      const result = (r.logic === "AND")
-        ? r.conditions.every(cond => checkCondition(parsed, cond))
-        : r.conditions.some(cond => checkCondition(parsed, cond));
-      if (!result) continue;
+ console.log("CHECKING RULE:", r.name)
+const result = (r.logic === "AND")
+  ? r.conditions.every(cond => checkCondition(parsed, cond))
+  : r.conditions.some(cond => checkCondition(parsed, cond));
+  console.log("  Standard conditions:", result)
+if (!result) continue;
 
-      if (r.action === 'Tag') {
-        if (r.tag) tags.push(r.tag);
-        continue;
+if (r.aggregateConditions?.length > 0) {
+  const results = await Promise.all(
+    r.aggregateConditions.map(c => checkAggregateCondition(c, parsed))
+  );
+  const passed = r.logic === "AND"
+    ? results.every(r => r)
+    : results.some(r => r);
+    console.log("  Aggregate conditions:", results, "=> passed:", passed)
+  if (!passed) continue;
+}
+
+if (r.action === 'Tag') {
+  if (r.tag) tags.push(r.tag);
+  continue;
+}
+ if (!matchedRuleName || r.priority < 9999) {
+    matchedRuleName = r.name;
+    finalAction = r.action;
+ console.log("  MATCHED RULE:", matchedRuleName, "Final action:", finalAction)
+    break;
       }
+}
 
-      // само тук попълваме matchedRule и финалното действие
-      if (!matchedRuleName || r.priority < 9999) {
-        matchedRuleName = r.name;
-        finalAction = r.action === 'Forbidden' ? 'Forbidden'
-          : r.action === 'Maybe' && finalAction !== 'Forbidden' ? 'Maybe'
-          : r.action === 'Allowed' && finalAction === 'Maybe' ? 'Maybe'
-          : r.action;
-      }
-    }
-
-    // fallback
+    // fallback (ако няма съвпаднало правило)
     if (!matchedRuleName) {
       const low = raw.toLowerCase();
       if (low.includes('ban')) finalAction = 'Forbidden';
       else if (low.includes('allow') || low.includes('ok')) finalAction = 'Allowed';
     }
 
-    // ----- AI Classification -----
+    // ----- AI Classification (по избор) -----
     let aiResult = null;
     try {
-      aiResult = await aiClassifyMessage(raw); // (async function, връща примерно { label: 'forbidden', score: 0.98 })
+      aiResult = await aiClassifyMessage(raw); // async функция, връща { label, score }
       if (aiResult?.label) {
-        tags.push('AI:' + aiResult.label); // можеш да смениш/оцветиш тага във фронта
-        // Ако искаш AI-то да override-ва status:
-        // if (aiResult.label === 'forbidden') finalAction = 'Forbidden';
-        // else if (aiResult.label === 'maybe' && finalAction === 'Allowed') finalAction = 'Maybe';
+        tags.push('AI:' + aiResult.label);
+        // AI Override?
+        // if (aiResult.label === 'Forbidden') finalAction = 'Forbidden';
+        // else if (aiResult.label === 'Maybe' && finalAction === 'Allowed') finalAction = 'Maybe';
       }
     } catch (err) {
       errorLog(err, "AI classification error");
@@ -367,7 +377,7 @@ app.post('/api/messages', async (req, res) => {
       status: finalAction,
       tags,
       matchedRule: matchedRuleName,
-      aiResult // пази пълния AI резултат
+      aiResult
     });
     await msg.save();
 
@@ -398,7 +408,6 @@ app.post('/api/messages', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 // GET /api/messages/paged?skip=0&limit=20&sort=receivedAt&dir=desc&status=Maybe
 app.get('/api/messages/paged', async (req, res) => {
   const {
@@ -409,16 +418,13 @@ app.get('/api/messages/paged', async (req, res) => {
     status,
     matchedRule,
     tag,
-    q // за търсене (по-късно)
+    q
   } = req.query;
 
   const filter = {};
   if (status) filter.status = status;
   if (matchedRule) filter.matchedRule = matchedRule;
   if (tag) filter.tags = tag;
-
-  // Ако искаш full-text search:
-  // if (q) filter['parsed.message.text'] = { $regex: q, $options: 'i' };
 
   const sortObj = { [sort]: dir === 'asc' ? 1 : -1 };
 
@@ -435,7 +441,7 @@ app.get('/api/messages/paged', async (req, res) => {
 // GET /api/messages?page=1&limit=50
 app.get('/api/messages', async (req, res) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
-  const limit = Math.min(parseInt(req.query.limit) || 50, 500); // Макс 500 за защита
+  const limit = Math.min(parseInt(req.query.limit) || 50, 500); //500 max
   const skip = (page - 1) * limit;
 
   const [messages, total] = await Promise.all([
@@ -461,6 +467,25 @@ app.patch('/api/messages/:id/status', async (req, res) => {
       errorLog("PATCH_MESSAGE_STATUS", `Message ${req.params.id} not found`);
       return res.status(404).json({ error: "Message not found" });
     }
+
+    const channels = await Channel.find({ active: true, triggerOn: status });
+    for (const ch of channels) {
+      try {
+        await axios.post(ch.callbackUrl, {
+          status,
+          id: updated._id,
+          tags: updated.tags,
+          matchedRule: updated.matchedRule,
+          parsed: updated.parsed,
+          rawXml: updated.rawXml,
+          receivedAt: updated.receivedAt
+        });
+        systemLog("WEBHOOK_SENT", `Status update to ${status}: sent to ${ch.callbackUrl}`);
+      } catch (e) {
+        errorLog(e, `Webhook send failed (status update): ${ch.callbackUrl}`);
+      }
+    }
+
     systemLog("PATCH_MESSAGE_STATUS", `Status of message ${req.params.id} updated to ${status}`);
     res.json({ message: "Status updated", id: req.params.id, status });
   } catch (e) {
@@ -468,7 +493,6 @@ app.patch('/api/messages/:id/status', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
 // GET maybe-only messages
 app.get('/api/messages/maybe', async (req, res) => {
   try {
@@ -492,10 +516,18 @@ app.post('/api/rules',
     body('logic').isIn(['AND', 'OR']),
     body('action').isIn(['Allowed','Forbidden','Tag','Maybe']),
     body('priority').isInt({ min: 1 }),
-    body('conditions').isArray({ min: 1 }),
-    body('conditions.*.field').isString().notEmpty(),
-    body('conditions.*.operator').isIn(['contains', 'not contains', 'equals','regex','gt','lt']),
-    body('conditions.*.value').isString().notEmpty()
+    body('conditions').optional().isArray(),
+    body('conditions.*.field').optional().isString().notEmpty(),
+    body('conditions.*.operator').optional().isIn(['contains', 'not contains', 'equals','regex','gt','lt']),
+    body('conditions.*.value').optional().isString().notEmpty(),
+    // агрегатни
+    body('aggregateConditions').optional().isArray(),
+    body('aggregateConditions.*.field').optional().isString().notEmpty(),
+    body('aggregateConditions.*.keyField').optional().isString().notEmpty(),
+    body('aggregateConditions.*.period').optional().isString().notEmpty(),
+    body('aggregateConditions.*.unique').optional().isBoolean(),
+    body('aggregateConditions.*.operator').optional().isIn(['lt', 'lte', 'eq', 'gte', 'gt']),
+    body('aggregateConditions.*.threshold').optional().isNumeric()
   ],
   async (req, res) => {
     const errors = validationResult(req);
@@ -506,7 +538,6 @@ app.post('/api/rules',
     res.status(201).json(rule);
   }
 );
-
 
 app.put('/api/rules/:id', async (req, res) => {
   const updated = await Rule.findByIdAndUpdate(req.params.id, req.body, { new: true });
