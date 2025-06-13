@@ -40,7 +40,7 @@ export default function ChannelsPage() {
 
   // AI config зареждане
   useEffect(() => {
-    axios.get('/api/config/ai').then(r => {
+    axios.get('/api/channels/config/ai').then(r => {
       setAiEnabled(r.data.aiEnabled)
       setAiToken(r.data.aiToken)
       setAiModel(r.data.aiModel)
@@ -59,7 +59,7 @@ export default function ChannelsPage() {
     }
 
     setAiLoading(true);
-    axios.put('/api/config/ai', {
+    axios.put('/api/channels/config/ai', {
       aiEnabled,
       aiToken: aiToken.trim(),
       aiModel: aiModel.trim()

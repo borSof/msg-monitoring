@@ -4,6 +4,7 @@ import React, {
   createContext, useContext,
   useState, useEffect
 } from 'react'
+import axios from "axios";
 
 const LS_TOKEN = 'authToken'
 const LS_ROLE  = 'role'
@@ -41,6 +42,23 @@ export function AuthProvider({ children }:{children:React.ReactNode}) {
   const [role, setRole]               = useState<string|null>(null)
   const [username, setUsername]       = useState<string|null>(null)
   const [permissions, setPermissions] = useState<string[]>([])
+
+useEffect(() => {
+  // Добавя интерцептор към всички axios заявки
+  const interceptor = axios.interceptors.request.use(config => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem(LS_TOKEN)
+      if (token) {
+        config.headers = config.headers || {};
+        config.headers.Authorization = 'Bearer ' + token;
+      }
+    }
+    return config;
+  });
+
+  // Чистим интерцептора при unmout (rarely needed, но за всеки случай)
+  return () => axios.interceptors.request.eject(interceptor);
+}, []);
 
   // 1. Зареждаме auth данните от localStorage при mount
   useEffect(() => {
