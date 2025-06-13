@@ -8,6 +8,8 @@ const os = require('os');
 const fs = require('fs');
 const path = require('path');
 const { checkAggregateCondition } = require('./utils/aggregateChecker');
+const authMiddleware = require('./authMiddleware');
+const requirePermission = require('./utils/requirePermission');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -53,6 +55,8 @@ app.use((req, res, next) => {
     next();
   }
 });
+// JWT authentication middleware
+app.use(authMiddleware);
 // Import models
 const Message = require('./models/Message');
 const Rule = require('./models/Rule');
@@ -101,13 +105,13 @@ app.post('/api/login', async (req, res) => {
 //+++++Callback
 // --- CHANNEL (webhook) MANAGEMENT API ---
 // GET: всички канали
-app.get('/api/channels', async (req, res) => {
+app.get('/api/channels', requirePermission('manage_channels'), async (req, res) => {
   const channels = await Channel.find();
   res.json(channels);
 });
 
 // POST: създай нов канал
-app.post('/api/channels', async (req, res) => {
+app.post('/api/channels', requirePermission('manage_channels'), async (req, res) => {
   const { name, callbackUrl, format, active, triggerOn } = req.body;
   if (!name || !callbackUrl) return res.status(400).json({ error: "Missing required fields" });
   const exists = await Channel.findOne({ name });
@@ -118,7 +122,7 @@ app.post('/api/channels', async (req, res) => {
 });
 
 // PUT: редактирай канал
-app.put('/api/channels/:id', async (req, res) => {
+app.put('/api/channels/:id', requirePermission('manage_channels'), async (req, res) => {
   const { name, callbackUrl, format, active, triggerOn } = req.body;
   const channel = await Channel.findByIdAndUpdate(
     req.params.id,
@@ -129,12 +133,12 @@ app.put('/api/channels/:id', async (req, res) => {
 });
 
 // DELETE: триене на канал
-app.delete('/api/channels/:id', async (req, res) => {
+app.delete('/api/channels/:id', requirePermission('manage_channels'), async (req, res) => {
   await Channel.findByIdAndDelete(req.params.id);
   res.json({ message: "Channel deleted" });
 });
 // GET current AI config
-app.get('/api/config/ai', async (req, res) => {
+app.get('/api/config/ai', requirePermission('manage_channels'), async (req, res) => {
   const config = await SystemConfig.findOne() || {};
   res.json({
     aiEnabled: config.aiEnabled ?? true,
@@ -144,7 +148,7 @@ app.get('/api/config/ai', async (req, res) => {
 });
 
 // PUT update AI config
-app.put('/api/config/ai', async (req, res) => {
+app.put('/api/config/ai', requirePermission('manage_channels'), async (req, res) => {
   let config = await SystemConfig.findOne();
   if (!config) config = new SystemConfig();
   if (req.body.aiEnabled !== undefined) config.aiEnabled = req.body.aiEnabled;
@@ -157,13 +161,13 @@ app.put('/api/config/ai', async (req, res) => {
 // === USER MANAGEMENT API (CRUD) ===
 
 // GET: всички потребители (production: сложи проверка за роля!)
-app.get('/api/users', async (req, res) => {
+app.get('/api/users', requirePermission('manage_users'), async (req, res) => {
   const users = await User.find({}, { passwordHash: 0 });
   res.json(users);
 });
 
 // POST: създай потребител
-app.post('/api/users', async (req, res) => {
+app.post('/api/users', requirePermission('manage_users'), async (req, res) => {
   const { username, password, role, active } = req.body;
   if (!username || !password) return res.status(400).json({ error: "Missing fields" });
   const exists = await User.findOne({ username });
@@ -176,7 +180,7 @@ app.post('/api/users', async (req, res) => {
 });
 
 // PUT: редактирай потребител
-app.put('/api/users/:id', async (req, res) => {
+app.put('/api/users/:id', requirePermission('manage_users'), async (req, res) => {
   const { password, role, active } = req.body;
   const update = { role, active };
   if (password) update.passwordHash = await bcrypt.hash(password, 10);
@@ -186,7 +190,7 @@ app.put('/api/users/:id', async (req, res) => {
 });
 
 // DELETE: триене на потребител
-app.delete('/api/users/:id', async (req, res) => {
+app.delete('/api/users/:id', requirePermission('manage_users'), async (req, res) => {
   await User.findByIdAndDelete(req.params.id);
   auditLog("DELETE_USER", req.user?.username || "system", { id: req.params.id });
   res.json({ message: "User deleted" });
@@ -194,13 +198,13 @@ app.delete('/api/users/:id', async (req, res) => {
 
 //Roles
 // Get all roles
-app.get('/api/roles', async (req, res) => {
+app.get('/api/roles', requirePermission('manage_roles'), async (req, res) => {
   const roles = await Role.find();
   res.json(roles);
 });
 
 // Create role
-app.post('/api/roles', async (req, res) => {
+app.post('/api/roles', requirePermission('manage_roles'), async (req, res) => {
   const { name, permissions } = req.body;
   if (!name) return res.status(400).json({ error: "Missing role name" });
   const exists = await Role.findOne({ name });
@@ -211,14 +215,14 @@ app.post('/api/roles', async (req, res) => {
 });
 
 // Update role
-app.put('/api/roles/:id', async (req, res) => {
+app.put('/api/roles/:id', requirePermission('manage_roles'), async (req, res) => {
   const { permissions } = req.body;
   const updated = await Role.findByIdAndUpdate(req.params.id, { permissions }, { new: true });
   res.json(updated);
 });
 
 // Delete role
-app.delete('/api/roles/:id', async (req, res) => {
+app.delete('/api/roles/:id', requirePermission('manage_roles'), async (req, res) => {
   await Role.findByIdAndDelete(req.params.id);
   res.json({ message: "Role deleted" });
 });
@@ -409,7 +413,7 @@ if (r.action === 'Tag') {
   }
 });
 // GET /api/messages/paged?skip=0&limit=20&sort=receivedAt&dir=desc&status=Maybe
-app.get('/api/messages/paged', async (req, res) => {
+app.get('/api/messages/paged', requirePermission('view_messages'), async (req, res) => {
   const {
     skip = 0,
     limit = 20,
@@ -439,7 +443,7 @@ app.get('/api/messages/paged', async (req, res) => {
 });
 
 // GET /api/messages?page=1&limit=50
-app.get('/api/messages', async (req, res) => {
+app.get('/api/messages', requirePermission('view_messages'), async (req, res) => {
   const page = Math.max(parseInt(req.query.page) || 1, 1);
   const limit = Math.min(parseInt(req.query.limit) || 50, 500); //500 max
   const skip = (page - 1) * limit;
@@ -452,7 +456,7 @@ app.get('/api/messages', async (req, res) => {
   res.json({ messages, total, page, limit });
 });
 
-app.patch('/api/messages/:id/status', async (req, res) => {
+app.patch('/api/messages/:id/status', requirePermission('review_maybe'), async (req, res) => {
   const { status } = req.body;
   if (!status || !["Allowed", "Forbidden", "Maybe"].includes(status))
     return res.status(400).json({ error: "Invalid status" });
@@ -494,7 +498,7 @@ app.patch('/api/messages/:id/status', async (req, res) => {
   }
 });
 // GET maybe-only messages
-app.get('/api/messages/maybe', async (req, res) => {
+app.get('/api/messages/maybe', requirePermission('review_maybe'), async (req, res) => {
   try {
     systemLog("GET_MAYBE_MESSAGES", "Fetching messages with status 'Maybe'");
     const m = await Message.find({ status: 'Maybe' }).sort({ receivedAt: -1 });
@@ -505,12 +509,13 @@ app.get('/api/messages/maybe', async (req, res) => {
   }
 });
 // CRUD for rules
-app.get('/api/rules', async (req, res) => {
+app.get('/api/rules', requirePermission('edit_rules'), async (req, res) => {
   const rules = await Rule.find().sort({ priority: 1, createdAt: 1 });
   res.json(rules);
 });
 
 app.post('/api/rules',
+  requirePermission('edit_rules'),
   [
     body('name').isString().notEmpty(),
     body('logic').isIn(['AND', 'OR']),
@@ -539,13 +544,13 @@ app.post('/api/rules',
   }
 );
 
-app.put('/api/rules/:id', async (req, res) => {
+app.put('/api/rules/:id', requirePermission('edit_rules'), async (req, res) => {
   const updated = await Rule.findByIdAndUpdate(req.params.id, req.body, { new: true });
   auditLog("UPDATE_RULE", req.user?.username || "system", updated.toObject());
   res.json(updated);
 });
 
-app.delete('/api/rules/:id', async (req, res) => {
+app.delete('/api/rules/:id', requirePermission('edit_rules'), async (req, res) => {
   const deleted = await Rule.findByIdAndDelete(req.params.id);
   auditLog("DELETE_RULE", req.user?.username || "system", deleted?.toObject() || {});
   res.status(204).send();
@@ -553,12 +558,12 @@ app.delete('/api/rules/:id', async (req, res) => {
 
 // ---- НОВО: visibleFields API ----
 
-app.get('/api/config/visible-fields', async (req, res) => {
+app.get('/api/config/visible-fields', requirePermission('manage_fields'), async (req, res) => {
   const config = await SystemConfig.findOne() || { visibleFields: [] }
   res.json(config.visibleFields)
 });
 
-app.put('/api/config/visible-fields', async (req, res) => {
+app.put('/api/config/visible-fields', requirePermission('manage_fields'), async (req, res) => {
   const { visibleFields } = req.body
   if (!Array.isArray(visibleFields)) return res.status(400).json({ error: "visibleFields must be array" })
   let config = await SystemConfig.findOne()
@@ -570,13 +575,13 @@ app.put('/api/config/visible-fields', async (req, res) => {
 });
 
 // GET всички полета с label и description
-app.get('/api/fields', async (req, res) => {
+app.get('/api/fields', requirePermission('manage_fields'), async (req, res) => {
   const fields = await FieldMetadata.find();
   res.json(fields);
 });
 
 // POST - добавя или обновява field metadata
-app.post('/api/fields', async (req, res) => {
+app.post('/api/fields', requirePermission('manage_fields'), async (req, res) => {
   const { name, label, description } = req.body;
   if (!name) return res.status(400).json({ error: "Field 'name' is required" });
   let field = await FieldMetadata.findOne({ name });
@@ -588,7 +593,7 @@ app.post('/api/fields', async (req, res) => {
   res.json(field);
 });
 
-app.delete('/api/fields/:name', async (req, res) => {
+app.delete('/api/fields/:name', requirePermission('manage_fields'), async (req, res) => {
   await FieldMetadata.deleteOne({ name: req.params.name });
   auditLog("FIELD_METADATA_DELETE", req.user?.username || "system", { name: req.params.name });
   res.status(204).send();
@@ -600,21 +605,21 @@ function getDateString() {
   return now.toISOString().slice(0,10); // "2025-05-28"
 }
 
-app.get('/api/system-log', (req, res) => {
+app.get('/api/system-log', requirePermission('view_status'), (req, res) => {
   const date = req.query.date || getDateString();
   const logPath = path.join(logDir, `system-${date}.log`);
   let log = [];
   try { log = fs.readFileSync(logPath, 'utf8').split('\n'); } catch {}
   res.json(log.slice(-100));
 });
-app.get('/api/audit-log', (req, res) => {
+app.get('/api/audit-log', requirePermission('view_status'), (req, res) => {
   const date = req.query.date || getDateString();
   const logPath = path.join(logDir, `audit-${date}.log`);
   let log = [];
   try { log = fs.readFileSync(logPath, 'utf8').split('\n'); } catch {}
   res.json(log.slice(-100));
 });
-app.get('/api/error-log', (req, res) => {
+app.get('/api/error-log', requirePermission('view_status'), (req, res) => {
   const date = req.query.date || getDateString();
   const logPath = path.join(logDir, `error-${date}.log`);
   let log = [];
@@ -623,7 +628,7 @@ app.get('/api/error-log', (req, res) => {
 });
 
 // Endpoint за налични дни (файлове) по тип лог
-app.get('/api/log-dates/:type', (req, res) => {
+app.get('/api/log-dates/:type', requirePermission('view_status'), (req, res) => {
   const type = req.params.type;
   let files = [];
   try {
@@ -650,7 +655,7 @@ function extractPaths(obj, prefix = '') {
 }
 
 // API endpoint: всички уникални полета (key-paths) от parsed
-app.get('/api/messages/fields', async (req, res) => {
+app.get('/api/messages/fields', requirePermission('manage_fields'), async (req, res) => {
   const messages = await Message.find({}, { parsed: 1 })
   const allPaths = new Set()
   for (const m of messages) {
