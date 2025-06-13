@@ -3,11 +3,13 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const { body, validationResult } = require('express-validator');
-const xml2js = require('xml2js');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
-const { checkAggregateCondition } = require('./utils/aggregateChecker');
+
+const loggingMiddleware = require('./middleware/logging');
+const xmlParsingMiddleware = require('./middleware/xmlParser');
+const { runRules } = require('./ruleEngine');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -25,37 +27,16 @@ const { aiClassifyMessage } = require('./ai');
 
 require('dotenv').config();
 
-
 // CORS and body parsing middleware
 app.use(cors({ origin: ['http://localhost:3001', 'http://192.168.199.129:3001'] }));
 app.use(express.json());
 app.use(express.text({ type: 'application/xml' }));
 
-// Logging middleware
-app.use((req, res, next) => {
-  systemLog("API_CALL", `${req.method} ${req.url}`);
-  next();
-});
-
-// XML parsing middleware
-app.use((req, res, next) => {
-  if (req.is('application/xml')) {
-    systemLog("XML_RECEIVED", req.body ? req.body.substring(0,200) : "");
-    xml2js.parseString(req.body, { explicitArray: false }, (err, result) => {
-      if (err) {
-        errorLog(err, "XML parse failed");
-        return res.status(400).send('Invalid XML');
-      }
-      req.body = result;
-      next();
-    });
-  } else {
-    next();
-  }
-});
+// Custom middleware
+app.use(loggingMiddleware);
+app.use(xmlParsingMiddleware);
 // Import models
 const Message = require('./models/Message');
-const Rule = require('./models/Rule');
 const SystemConfig = require('./models/SystemConfig');
 
 // LOGIN
@@ -294,67 +275,7 @@ app.post('/api/messages', async (req, res) => {
       systemLog("UNWRAP", `Unwrapped root key to ${JSON.stringify(parsed).substring(0, 200)}`);
     }
 
-    const rules = await Rule.find().sort({ priority: 1, createdAt: 1 });
-    const tags = [];
-    let matchedRuleName = null;
-    let finalAction = 'Allowed'; //.env?
-
-    // ----- Rule Engine -----
-    const getField = (obj, path) =>
-      path.split('.').reduce((o, p) => (o && o[p] != null ? o[p] : null), obj);
-
-    function checkCondition(obj, cond) {
-      const val = getField(obj, cond.field);
-      if (val == null) return false;
-      const str = String(val);
-      switch (cond.operator) {
-        case 'contains': return str.includes(cond.value);
-        case 'not contains': return !str.includes(cond.value);
-        case 'equals': return str === cond.value;
-        case 'regex': return new RegExp(cond.value).test(str);
-        case 'gt': return Number(str) > Number(cond.value);
-        case 'lt': return Number(str) < Number(cond.value);
-        default: return false;
-      }
-    }
-
-    for (const r of rules) {
- console.log("CHECKING RULE:", r.name)
-const result = (r.logic === "AND")
-  ? r.conditions.every(cond => checkCondition(parsed, cond))
-  : r.conditions.some(cond => checkCondition(parsed, cond));
-  console.log("  Standard conditions:", result)
-if (!result) continue;
-
-if (r.aggregateConditions?.length > 0) {
-  const results = await Promise.all(
-    r.aggregateConditions.map(c => checkAggregateCondition(c, parsed))
-  );
-  const passed = r.logic === "AND"
-    ? results.every(r => r)
-    : results.some(r => r);
-    console.log("  Aggregate conditions:", results, "=> passed:", passed)
-  if (!passed) continue;
-}
-
-if (r.action === 'Tag') {
-  if (r.tag) tags.push(r.tag);
-  continue;
-}
- if (!matchedRuleName || r.priority < 9999) {
-    matchedRuleName = r.name;
-    finalAction = r.action;
- console.log("  MATCHED RULE:", matchedRuleName, "Final action:", finalAction)
-    break;
-      }
-}
-
-    // fallback (ако няма съвпаднало правило)
-    if (!matchedRuleName) {
-      const low = raw.toLowerCase();
-      if (low.includes('ban')) finalAction = 'Forbidden';
-      else if (low.includes('allow') || low.includes('ok')) finalAction = 'Allowed';
-    }
+    const { finalAction, matchedRuleName, tags } = await runRules(parsed, raw);
 
     // ----- AI Classification (по избор) -----
     let aiResult = null;
