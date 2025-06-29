@@ -92,23 +92,33 @@ function renderAiResult(aiResult: any) {
 }
 
 type Status = 'Allowed' | 'Forbidden' | 'Maybe';
-type StatusCount = { Allowed: number; Forbidden: number; Maybe: number; TimedOut: number; };
+type StatusCount = { Allowed: number; Forbidden: number; Maybe: number; TimedOut: number; OriginalMaybe: number };
 
 function isStatus(key: any): key is Status {
   return key === 'Allowed' || key === 'Forbidden' || key === 'Maybe';
 }
 
-function aggregateMessagesPerDay(messages: any[]) {
+function aggregateMessagesPerDay(messages: any[]): (StatusCount & { date: string })[] {
   const byDay: Record<string, StatusCount> = {};
   for (const m of messages) {
     const d = new Date(m.receivedAt);
     const day = d.toLocaleDateString();
-    if (!byDay[day]) byDay[day] = { Allowed: 0, Forbidden: 0, Maybe: 0, TimedOut: 0 };
-    if (m.status === 'Forbidden' && m.originalStatus === 'Maybe') {
+
+    if (!byDay[day]) byDay[day] = { Allowed: 0, Forbidden: 0, Maybe: 0, TimedOut: 0, OriginalMaybe: 0 };
+
+    // Всички с оригинален Maybe броим ТУК
+    if (m.originalStatus === "Maybe") {
+      byDay[day].OriginalMaybe++;
+    }
+    // Стандартните статуси
+    if (m.status === "Allowed") {
+      byDay[day].Allowed++;
+    } else if (m.status === "Forbidden" && m.originalStatus === "Maybe") {
       byDay[day].TimedOut++;
-    } else if (isStatus(m.status)) {
-      // >>> Каст към Status, понеже е минал type guard-а:
-      byDay[day][m.status as Status]++;
+    } else if (m.status === "Forbidden") {
+      byDay[day].Forbidden++;
+    } else if (m.status === "Maybe") {
+      byDay[day].Maybe++;
     }
   }
   return Object.entries(byDay)
@@ -216,6 +226,7 @@ const { data, isLoading, error } = useQuery({
               <Bar dataKey="Forbidden" fill="#e53e3e" />
               <Bar dataKey="Maybe" fill="#ecc94b" />
               <Bar dataKey="TimedOut" fill="#ed8936" />
+              <Bar dataKey="OriginalMaybe" fill="#4299e1" />
             </BarChart>
           </ResponsiveContainer>
         </Box>

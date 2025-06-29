@@ -16,18 +16,10 @@ async function checkAggregateCondition(cond, parsed) {
   const since = new Date(Date.now() - parsePeriod(cond.period));
   const keyValue = getField(parsed, cond.keyField);
 
-  // DEBUG
-  console.log('AGG CHECK:', {
-    cond,
-    since,
-    keyValue,
-    parsed
-  });
-
   if (!keyValue) return false;
 
 const match = {
-  [`parsed.${cond.keyField}`]: keyValue,
+  [cond.keyField]: keyValue,
   receivedAt: { $gte: since }
 };
   const pipeline = [

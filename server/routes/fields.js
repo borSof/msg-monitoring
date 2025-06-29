@@ -48,13 +48,6 @@ router.delete('/fields/:name', requirePermission('manage_fields'), async (req, r
   res.status(204).send();
 });
 
-// DELETE - триене на field metadata
-router.delete('/fields/:name', requirePermission('manage_fields'), async (req, res) => {
-  await FieldMetadata.deleteOne({ name: req.params.name });
-  auditLog("FIELD_METADATA_DELETE", req.user?.username || "system", { name: req.params.name });
-  res.status(204).send();
-});
-
 // ----- Helper: extractPaths -----
 function extractPaths(obj, prefix = '') {
   let paths = [];

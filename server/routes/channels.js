@@ -2,6 +2,7 @@ const express = require('express');
 const Channel = require('../models/Channel');
 const SystemConfig = require('../models/SystemConfig');
 const requirePermission = require('../utils/requirePermission');
+const { resetCache } = require('../ai');
 
 const router = express.Router();
 
@@ -59,6 +60,7 @@ router.put('/config/ai', requirePermission('manage_channels'), async (req, res) 
   if (req.body.aiModel !== undefined) config.aiModel = req.body.aiModel;
   if (req.body.aiToken) config.aiToken = req.body.aiToken;
   await config.save();
+ resetCache();
   res.json({ success: true });
 });
 

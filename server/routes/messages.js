@@ -6,6 +6,7 @@ const requirePermission = require('../utils/requirePermission');
 const { systemLog, errorLog } = require('../utils/fileLogger');
 const axios = require('axios');
 const { aiClassifyMessage } = require('../ai');
+const { checkAggregateCondition } = require('../utils/aggregateChecker');
 
 const router = express.Router();
 
@@ -70,13 +71,6 @@ router.post('/', requirePermission('view_messages'), async (req, res) => {
         finalAction = r.action;
         break;
       }
-    }
-
-    // fallback (ако няма съвпаднало правило)
-    if (!matchedRuleName) {
-      const low = raw.toLowerCase();
-      if (low.includes('ban')) finalAction = 'Forbidden';
-      else if (low.includes('allow') || low.includes('ok')) finalAction = 'Allowed';
     }
 
     // ----- AI Classification (по избор) -----
@@ -192,27 +186,34 @@ router.patch('/:id/status', requirePermission('review_maybe'), async (req, res) 
     return res.status(400).json({ error: "Invalid status" });
 
   try {
-    const updated = await Message.findByIdAndUpdate(
-      req.params.id,
-      { status: status },
-      { new: true }
-    );
-    if (!updated) {
+    // 1. Зареждаме съобщението от базата
+    const msg = await Message.findById(req.params.id);
+    if (!msg) {
       errorLog("PATCH_MESSAGE_STATUS", `Message ${req.params.id} not found`);
       return res.status(404).json({ error: "Message not found" });
     }
 
+    // 2. Ако няма originalStatus – запиши текущия статус като оригинален
+    if (!msg.originalStatus) {
+      msg.originalStatus = msg.status;
+    }
+
+    // 3. Променяме статуса
+    msg.status = status;
+    await msg.save();
+
+    // --- Webhook-и и лога, както досега ---
     const channels = await Channel.find({ active: true, triggerOn: status });
     for (const ch of channels) {
       try {
         await axios.post(ch.callbackUrl, {
           status,
-          id: updated._id,
-          tags: updated.tags,
-          matchedRule: updated.matchedRule,
-          parsed: updated.parsed,
-          rawXml: updated.rawXml,
-          receivedAt: updated.receivedAt
+          id: msg._id,
+          tags: msg.tags,
+          matchedRule: msg.matchedRule,
+          parsed: msg.parsed,
+          rawXml: msg.rawXml,
+          receivedAt: msg.receivedAt
         });
         systemLog("WEBHOOK_SENT", `Status update to ${status}: sent to ${ch.callbackUrl}`);
       } catch (e) {
