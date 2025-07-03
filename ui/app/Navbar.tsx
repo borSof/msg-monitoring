@@ -1,4 +1,3 @@
-// app/Navbar.tsx
 'use client';
 
 import {
@@ -100,5 +99,5 @@ function Navbar() {
 }
 
 /* ---------  EXPORTS  --------- */
-export default Navbar;   // ⬅️ за `import Navbar from '@/app/Navbar'`
-export { Navbar };       // ⬅️ за старите `import { Navbar } ...`
+export default Navbar;   
+export { Navbar };
